@@ -2079,13 +2079,17 @@ Bu dosyayi alan ajan icin baslangic talimati:
 
 ---
 
-# 38. REVISION UPDATE: BROWSER EXTENSION UI E2E & INTEGRATION HARNESS SCOPE
+# 38. REVISION UPDATE: BROWSER EXTENSION UI E2E, npm test & RUNNER PREREQUISITES
 
 As part of the final execution closure, the integration harness (`test/workspace/browser-extension-e2e-harness.mjs`) is restricted to the following exact coverage:
 1. Unpacked extension build output structure (`build/chrome/`).
 2. Settings backend persistence and toggle between `omp-sdk-v2` and `rust-v1` rollback via workspace manager mocks.
 3. Live WebSocket gateway connection and workspace open contract (`/webbrain/coding`).
 4. Playwright unpacked extension loading smoke test (when browser executable is available).
+
+**`npm test` Execution & Prerequisites**:
+- Full suite (`npm test`) successfully passes Markdown rendering (46/46), security corpus (60/60), and core integration test suites.
+- **Runner Prerequisite / Environmental Blocker**: 2 Playwright-dependent trace tests fail solely due to missing local Playwright browser binaries (`C:\Users\miski\AppData\Local\ms-playwright\...` not installed in offline environment); this is an external runner prerequisite, not a code regression.
 
 **Explicit Non-Coverage**: This harness does **not** validate autonomous coding task execution (`coding.start`), progress normalization, task steering (`coding.steer`), task abort (`coding.abort`), or full multi-turn browser UI verification loops. Browser UI E2E automation remains **PARTIALLY AUTOMATED / GATED** pending headless browser extension UI runner support.
 

@@ -68,8 +68,9 @@ Measured from actual test runs on Windows 11 workstation:
 
 ## 5. Exit Gate, Browser UI E2E & Rust Decommission Status
 
-- **Browser UI E2E Status**: **PARTIALLY AUTOMATED / GATED**
-  - Automated testing covers in-process `AgentSession` tool loop, live WebSocket protocol contracts, dual-backend manager rollback, unpacked build bundle integrity, and settings persistence.
+- **Browser UI E2E Status & `npm test` Execution**: **PARTIALLY AUTOMATED / GATED**
+  - Full suite execution (`npm test`) passes markdown rendering (46/46), security corpus (60/60), and core integration test suites successfully.
+  - **Environmental Blocker**: 2 Playwright-dependent trace tests fail solely due to missing local Playwright browser binaries (`C:\Users\miski\AppData\Local\ms-playwright\...` executable not installed in offline environment); this is an external runner prerequisite constraint, not a code regression.
   - Full automated extension-hosted browser UI E2E (driving real Chrome extension sidepanel DOM and multi-turn coding handoff UI loops) remains gated on headless browser UI extension runner support; manual user verification in unpacked Chrome build (`build\chrome/`) and integration test harness execution are the verified paths.
 - **Rust Decommission Decision**: **BLOCKED / GATED**
   - In accordance with Sections 25 and 26 of `WEBBRAIN_OMP_SDK_MIGRATION_PLAN.md`, Rust V1 must be retained as the operational fallback baseline (`workspaceBackend: 'rust-v1'`).
