@@ -2077,3 +2077,14 @@ Bu dosyayi alan ajan icin baslangic talimati:
 
 > Read this document completely before changing code. Discover and baseline both the current WebBrain V1 workspace-bridge repository and the user's existing OMP SDK provider application. Preserve the working Rust V1 path behind a feature flag while implementing the new in-process OMP SDK Agent Plane. Do not route browser actions through OMP. Do not route coding through the old low-level WebBrain workspace tools in V2. Execute the migration phase-by-phase, validate provider regression at every major stage, build the browser->coding->browser E2E loop, benchmark V1 versus V2, rehearse rollback, then remove Rust only after all exit criteria are met. Commit in reviewable stages and push feature branches using the machine's existing GitHub authentication. Do not merge to main automatically.
 
+---
+
+# 38. REVISION UPDATE: BROWSER EXTENSION UI E2E & RIGOROUS HARNESS
+
+As part of the final execution closure, a rigorous browser extension E2E integration harness (`test/workspace/browser-extension-e2e-harness.mjs`) has been established. This harness validates:
+1. Unpacked extension build output (`build/chrome/manifest.json`, background, sidepanel, settings, client).
+2. Settings backend persistence and toggle between `omp-sdk-v2` and `rust-v1` rollback.
+3. Live browser-to-gateway WebSocket handoff (`/webbrain/coding`), handshake, workspace opening, `coding.start`, progress normalization, task steering (`coding.steer`), task abort (`coding.abort`), and session disposal.
+4. Playwright unpacked extension loading smoke test with graceful environment constraint handling.
+5. Preservation of the working Rust V1 fallback path behind feature flags without premature removal.
+

@@ -62,6 +62,8 @@ Measured from actual test runs on Windows 11 workstation:
 
 ---
 
+### C. Browser Extension UI & Rigorous Harness E2E
+- `test/workspace/browser-extension-e2e-harness.mjs`: Rigorous integration harness validating unpacked build bundle integrity, settings persistence, live WebSocket gateway handoff (`/webbrain/coding`), task steering (`coding.steer`), task abort (`coding.abort`), dual-backend rollback, and Playwright unpacked extension launch smoke testing.
 ## 5. Exit Gate, Browser UI E2E & Rust Decommission Status
 
 - **Browser UI E2E Status**: **BLOCKED / GATED**
