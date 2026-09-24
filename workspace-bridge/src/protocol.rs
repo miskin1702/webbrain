@@ -105,9 +105,9 @@ pub struct AuthHandshakeParams {
     pub token: String,
     #[serde(default)]
     pub client: Option<String>,
-    #[serde(rename = "extensionId", default)]
+    #[serde(rename = "extensionId", alias = "extension_id", default)]
     pub extension_id: Option<String>,
-    #[serde(rename = "protocolVersion", default)]
+    #[serde(rename = "protocolVersion", alias = "protocol_version", default)]
     pub protocol_version: Option<u32>,
 }
 
@@ -147,9 +147,9 @@ pub struct SearchCodeParams {
     pub query: String,
     #[serde(default)]
     pub limit: Option<usize>,
-    #[serde(rename = "isRegex", default)]
+    #[serde(rename = "isRegex", alias = "is_regex", default)]
     pub is_regex: Option<bool>,
-    #[serde(rename = "caseSensitive", default)]
+    #[serde(rename = "caseSensitive", alias = "case_sensitive", default)]
     pub case_sensitive: Option<bool>,
     #[serde(default)]
     pub include: Option<Vec<String>>,
@@ -177,7 +177,7 @@ pub struct SearchCodeResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadFileParams {
     pub path: String,
-    #[serde(rename = "maxChars", default)]
+    #[serde(rename = "maxChars", alias = "max_chars", default)]
     pub max_chars: Option<usize>,
 }
 
@@ -196,9 +196,9 @@ pub struct ReadFileResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadRangeParams {
     pub path: String,
-    #[serde(rename = "startLine")]
+    #[serde(rename = "startLine", alias = "start_line")]
     pub start_line: usize,
-    #[serde(rename = "endLine")]
+    #[serde(rename = "endLine", alias = "end_line")]
     pub end_line: usize,
 }
 
@@ -219,15 +219,15 @@ pub struct ReadRangeResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApplyPatchParams {
     pub path: String,
-    #[serde(rename = "expectedRevision")]
+    #[serde(rename = "expectedRevision", alias = "expected_revision")]
     pub expected_revision: u64,
-    #[serde(rename = "expectedHash", default)]
+    #[serde(rename = "expectedHash", alias = "expected_hash", default)]
     pub expected_hash: Option<String>,
     #[serde(default)]
     pub patch: Option<String>,
-    #[serde(rename = "oldText", default)]
+    #[serde(rename = "oldText", alias = "old_text", default)]
     pub old_text: Option<String>,
-    #[serde(rename = "newText", default)]
+    #[serde(rename = "newText", alias = "new_text", default)]
     pub new_text: Option<String>,
 }
 
@@ -263,7 +263,7 @@ pub struct CreateFileResult {
 pub struct GitDiffParams {
     #[serde(default)]
     pub paths: Option<Vec<String>>,
-    #[serde(rename = "maxBytes", default)]
+    #[serde(rename = "maxBytes", alias = "max_bytes", default)]
     pub max_bytes: Option<usize>,
 }
 
@@ -280,7 +280,7 @@ pub struct RunCommandParams {
     pub command: String,
     #[serde(default)]
     pub args: Option<Vec<String>>,
-    #[serde(rename = "timeoutMs", default)]
+    #[serde(rename = "timeoutMs", alias = "timeout_ms", default)]
     pub timeout_ms: Option<u64>,
 }
 
