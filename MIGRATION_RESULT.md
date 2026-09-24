@@ -7,18 +7,19 @@
 - **Dual-Backend Support**: Fully supported via `workspaceBackend` configuration (`omp-sdk-v2` developer default, `rust-v1` fallback baseline).
 - **Absolute Root Enforcement**: Absolute workspace path is strictly enforced; relative `.` path recommendations removed from UI.
 
-## 2. Repositories, Branches & Pushed Commits
+## 2. Repositories, Branches & Remote References
 
 ### WebBrain Repository (`C:\Users\miski\Desktop\webbrain`)
 - **Active Branch**: `feature/omp-sdk-coding-migration` (tracking `origin/feature/omp-sdk-coding-migration`)
-- **Head Commit**: `bf666219` (pushed to origin)
+- **Latest Implementation Commits**:
+  - `bf666219`: Enforce absolute workspace root path, remove dot recommendation, and update live contract test
+  - `c896ca58`: Document real E2E evidence, benchmark table, and gated exit decision
 - **Base Commit**: `1e2dcf6e6ec5513f82b0b8a070860063a29f467f` (`upstream/main` HEAD — untouched)
 
 ### OMP Provider Application (`C:\Users\miski\Desktop\api`)
 - **Active Branch**: `feature/webbrain-coding-service` (tracking `origin/feature/webbrain-coding-service`)
-- **Head Commit**: `32989d8` (pushed to origin)
+- **HEAD Commit**: `32989d8` (pushed to origin)
 - **Base Commit**: `fdf3e34` (`main` HEAD — untouched)
-
 ---
 
 ## 3. Real E2E vs. Mock-Only Protocol Verification
@@ -61,10 +62,13 @@ Measured from actual test runs on Windows 11 workstation:
 
 ---
 
-## 5. Exit Gate & Rust Decommission Decision
+## 5. Exit Gate, Browser UI E2E & Rust Decommission Status
 
-- **Current Status**: **BLOCKED / GATED**
-- **Justification**:
+- **Browser UI E2E Status**: **BLOCKED / GATED**
+  - Automated testing covers in-process `AgentSession` tool loop, live WebSocket protocol contracts, dual-backend manager rollback, and security corpus.
+  - Automated extension-hosted browser UI E2E (driving real Chrome extension sidepanel DOM during coding task) remains blocked on the absence of a headless browser UI extension runner; manual user verification in unpacked Chrome build (`build\chrome/`) is the verified path.
+
+- **Rust Decommission Decision**: **BLOCKED / GATED**
   - In accordance with Sections 25 and 26 of `WEBBRAIN_OMP_SDK_MIGRATION_PLAN.md`, Rust V1 must be retained as the operational fallback baseline (`workspaceBackend: 'rust-v1'`).
   - While V2 protocol, in-process session tool loop, settings UI, and rollback have passed all automated tests, the required **production soak testing** across multi-hour user coding sessions has not yet concluded.
   - Decommissioning Rust remains gated until real-world user soak validation is complete. Rust V1 code in `workspace-bridge/` is preserved cleanly without blocking V2 default operation.
