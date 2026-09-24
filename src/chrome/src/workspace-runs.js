@@ -1,21 +1,17 @@
-/**
- * Background Workspace Manager & Controller.
- *
- * Manages workspace connection lifecycle, pairing token, active project root,
- * permissions, file revision caching, and tool execution dispatch for the
- * WebBrain agent.
- */
+import { createCodingClientV2 } from './coding-client-v2.js';
 
 export const WORKSPACE_STORAGE_KEY = 'webbrainWorkspaceConfig';
 export const DEFAULT_WORKSPACE_URL = 'ws://127.0.0.1:18374';
 
-export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) {
+export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } = {}) {
+  const codingClientV2 = createCodingClientV2({ chromeApi });
   const config = {
     enabled: false,
     url: DEFAULT_WORKSPACE_URL,
     token: '',
     allowWrite: true,
     allowCommand: false,
+    workspaceBackend: 'rust-v1',
   };
 
   const state = {
@@ -88,9 +84,26 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
     if (opts.token !== undefined) config.token = opts.token;
     if (opts.allowWrite !== undefined) config.allowWrite = opts.allowWrite === true;
     if (opts.allowCommand !== undefined) config.allowCommand = opts.allowCommand === true;
+    if (opts.workspaceBackend) config.workspaceBackend = opts.workspaceBackend;
     config.enabled = true;
 
     await saveConfig();
+
+    if (config.workspaceBackend === 'omp-sdk-v2') {
+      try {
+        const res = await codingClientV2.connect({ url: config.url, token: config.token });
+        await codingClientV2.openWorkspace(opts.path || opts.root || '.');
+        state.connected = true;
+        state.authenticated = true;
+        state.lastError = '';
+        return getWorkspaceStatus();
+      } catch (e) {
+        state.connected = false;
+        state.authenticated = false;
+        state.lastError = e.message || String(e);
+        return getWorkspaceStatus();
+      }
+    }
 
     try {
       if (typeof ensureOffscreen === 'function') {

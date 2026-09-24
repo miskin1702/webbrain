@@ -2,7 +2,7 @@
  * OMP SDK Coding Client V2 for WebBrain.
  * Connects via localhost WebSocket to /webbrain/coding on the OMP SDK host.
  * Implements task-oriented coding handoff protocol v2, event normalization,
- * connection epochs, and explicit fallback telemetry.
+ * connection epochs, task retention until verification, and explicit fallback telemetry.
  */
 
 export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {}) {
@@ -19,10 +19,10 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
   let lastProgressState = 'idle';
   let rootPath = '';
   let rootName = '';
+  let activeTools = [];
   let capabilities = { read: true, write: true, command: true };
   let pendingRequests = new Map();
   let eventListeners = new Set();
-  let reconnectTimer = null;
   let fallbackUsed = false;
 
   function generateId(prefix = 'req') {
@@ -37,6 +37,15 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
     }
   }
 
+  function clearPendingRequests(error = new Error('Connection closed or reconnected')) {
+    for (const [id, req] of pendingRequests.entries()) {
+      try {
+        req.reject(error);
+      } catch {}
+    }
+    pendingRequests.clear();
+  }
+
   function getStatus() {
     return {
       backend: 'omp-sdk-v2',
@@ -45,6 +54,7 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
       bridgeUrl,
       root: rootPath,
       rootName,
+      activeTools,
       capabilities,
       taskStatus,
       lastProgressState,
@@ -65,6 +75,7 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
       try { ws.close(); } catch {}
       ws = null;
     }
+    clearPendingRequests(new Error('Reconnecting V2 coding client'));
 
     return new Promise((resolve, reject) => {
       try {
@@ -90,7 +101,10 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
           v: 2,
           id: helloId,
           type: 'hello',
-          client: 'webbrain-extension',
+          client: {
+            name: 'webbrain-extension',
+            version: '36.8.0',
+          },
           token: pairingToken || undefined,
         };
 
@@ -98,6 +112,7 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
           resolve: (res) => {
             clearTimeout(timeout);
             authenticated = true;
+            if (res.sessionId) activeSessionId = res.sessionId;
             resolve({ ok: true, status: getStatus(), session: res });
           },
           reject: (err) => {
@@ -108,7 +123,13 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
           },
         });
 
-        ws.send(JSON.stringify(helloMsg));
+        try {
+          ws.send(JSON.stringify(helloMsg));
+        } catch (err) {
+          pendingRequests.delete(helloId);
+          clearTimeout(timeout);
+          reject(err);
+        }
       };
 
       ws.onmessage = (event) => {
@@ -143,6 +164,7 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
       ws.onclose = () => {
         connected = false;
         authenticated = false;
+        clearPendingRequests(new Error('V2 coding WebSocket closed'));
         notifyListeners('disconnected', {});
       };
     });
@@ -150,6 +172,12 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
 
   function handleHostEvent(type, payload) {
     switch (type) {
+      case 'coding.started':
+        if (payload.taskId) activeTaskId = payload.taskId;
+        lastProgressState = 'starting';
+        taskStatus = 'running';
+        notifyListeners('started', payload);
+        break;
       case 'coding.progress':
         lastProgressState = payload.state || 'running';
         taskStatus = payload.state === 'completed' ? 'completed' : payload.state === 'failed' ? 'failed' : 'running';
@@ -159,7 +187,9 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
         notifyListeners('tool_activity', payload);
         break;
       case 'coding.changed_files':
-        notifyListeners('changed_files', payload);
+        if (payload.changedFiles) {
+          notifyListeners('changed_files', payload);
+        }
         break;
       case 'coding.verification_requested':
         taskStatus = 'ready_for_browser_verification';
@@ -167,12 +197,11 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
         break;
       case 'coding.completed':
         taskStatus = 'completed';
-        activeTaskId = null;
+        // Note: activeTaskId is purposely NOT cleared here so verification.result or follow-ups can reference it!
         notifyListeners('completed', payload);
         break;
       case 'coding.failed':
         taskStatus = 'failed';
-        activeTaskId = null;
         notifyListeners('failed', payload);
         break;
       case 'coding.aborted':
@@ -222,10 +251,11 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
   }
 
   async function openWorkspace(workspacePath) {
-    const res = await sendRequest('workspace.open', { workspacePath });
-    currentWorkspaceId = res.workspaceId || 'ws-default';
-    rootPath = res.rootPath || workspacePath;
+    const res = await sendRequest('workspace.open', { path: workspacePath });
+    currentWorkspaceId = res.workspaceId || res.id || 'ws-default';
+    rootPath = res.path || res.rootPath || workspacePath;
     rootName = res.rootName || rootPath.split(/[/\\]/).pop() || 'workspace';
+    activeTools = res.activeTools || [];
     if (res.capabilities) capabilities = res.capabilities;
     return res;
   }
@@ -236,23 +266,29 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
       workspaceId: currentWorkspaceId,
       task: taskSpec,
     });
-    activeTaskId = res.taskId;
-    activeSessionId = res.sessionId;
+    if (res.taskId) activeTaskId = res.taskId;
+    if (res.sessionId) activeSessionId = res.sessionId;
     taskStatus = 'running';
     return res;
   }
 
-  async function steerTask(message) {
+  async function steerTask(messageOrSpec) {
+    const instruction = typeof messageOrSpec === 'string' ? messageOrSpec : messageOrSpec?.instruction;
+    const browserObservations = typeof messageOrSpec === 'object' ? messageOrSpec?.browserObservations : undefined;
     return await sendRequest('coding.steer', {
       taskId: activeTaskId,
-      message,
+      instruction,
+      browserObservations,
     });
   }
 
-  async function followUp(message) {
+  async function followUp(messageOrSpec) {
+    const instruction = typeof messageOrSpec === 'string' ? messageOrSpec : messageOrSpec?.instruction;
+    const browserObservations = typeof messageOrSpec === 'object' ? messageOrSpec?.browserObservations : undefined;
     return await sendRequest('coding.follow_up', {
       taskId: activeTaskId,
-      message,
+      instruction,
+      browserObservations,
     });
   }
 
@@ -273,17 +309,27 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
     return await sendRequest('coding.status', { taskId: activeTaskId });
   }
 
-  async function submitVerification(result) {
-    return await sendRequest('verification.result', {
+  async function submitVerification(resultOrSpec) {
+    const success = typeof resultOrSpec === 'boolean' ? resultOrSpec : resultOrSpec?.success === true;
+    const feedback = typeof resultOrSpec === 'object' ? resultOrSpec?.feedback || resultOrSpec?.summary : undefined;
+    const browserObservations = typeof resultOrSpec === 'object' ? resultOrSpec?.browserObservations : undefined;
+
+    const res = await sendRequest('verification.result', {
       taskId: activeTaskId,
-      result,
+      success,
+      feedback,
+      browserObservations,
     });
+    // Once verification is finalized, clear activeTaskId
+    activeTaskId = null;
+    return res;
   }
 
   async function closeSession() {
     try {
-      if (activeTaskId) await abortTask();
-      await sendRequest('session.close', { sessionId: activeSessionId });
+      if (activeSessionId) {
+        await sendRequest('session.close', { workspaceId: currentWorkspaceId });
+      }
     } catch {}
     if (ws) {
       try { ws.close(); } catch {}
@@ -291,6 +337,7 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
     }
     connected = false;
     authenticated = false;
+    clearPendingRequests(new Error('Session closed'));
   }
 
   function addEventListener(fn) {
