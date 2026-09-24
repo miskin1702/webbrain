@@ -146,6 +146,8 @@ const cloudBridgeStatusText = document.getElementById('cloud-bridge-status-text'
 const workspaceBridgeToggle = document.getElementById('toggle-workspace-bridge');
 const workspaceBridgeUrlInput = document.getElementById('input-workspace-bridge-url');
 const workspaceBridgeTokenInput = document.getElementById('input-workspace-bridge-token');
+const workspaceBackendSelect = document.getElementById('select-workspace-backend');
+const workspacePathInput = document.getElementById('input-workspace-path');
 const workspaceWriteToggle = document.getElementById('toggle-workspace-write');
 const workspaceCommandToggle = document.getElementById('toggle-workspace-command');
 const workspaceBridgeStatus = document.getElementById('workspace-bridge-status');
@@ -777,8 +779,11 @@ function startWorkspaceBridgeStatusPolling() {
 async function saveWorkspaceBridgeConfig() {
   if (!workspaceBridgeToggle) return;
   const enabled = workspaceBridgeToggle.checked;
-  const url = workspaceBridgeUrlInput?.value?.trim() || 'ws://127.0.0.1:18374';
+  const workspaceBackend = workspaceBackendSelect?.value || 'omp-sdk-v2';
+  const defaultUrl = workspaceBackend === 'rust-v1' ? 'ws://127.0.0.1:18374' : 'ws://127.0.0.1:18374/webbrain/coding';
+  const url = workspaceBridgeUrlInput?.value?.trim() || defaultUrl;
   const token = workspaceBridgeTokenInput?.value?.trim() || '';
+  const workspacePath = workspacePathInput?.value?.trim() || '.';
   const allowWrite = workspaceWriteToggle?.checked !== false;
   const allowCommand = workspaceCommandToggle?.checked === true;
 
@@ -790,6 +795,8 @@ async function saveWorkspaceBridgeConfig() {
         token,
         allowWrite,
         allowCommand,
+        workspaceBackend,
+        workspacePath,
       });
       renderWorkspaceBridgeStatus(status);
     } else {
@@ -804,12 +811,14 @@ async function saveWorkspaceBridgeConfig() {
 async function initWorkspaceBridgeSettings(stored) {
   if (!workspaceBridgeToggle || !workspaceBridgeUrlInput) return;
   const cfg = stored.webbrainWorkspaceConfig || {};
+  const defaultUrl = cfg.workspaceBackend === 'rust-v1' ? 'ws://127.0.0.1:18374' : 'ws://127.0.0.1:18374/webbrain/coding';
   workspaceBridgeToggle.checked = cfg.enabled === true;
-  workspaceBridgeUrlInput.value = cfg.url || 'ws://127.0.0.1:18374';
+  if (workspaceBackendSelect) workspaceBackendSelect.value = cfg.workspaceBackend || 'omp-sdk-v2';
+  if (workspacePathInput) workspacePathInput.value = cfg.workspacePath || '.';
+  workspaceBridgeUrlInput.value = cfg.url || defaultUrl;
   if (workspaceBridgeTokenInput) workspaceBridgeTokenInput.value = cfg.token || '';
   if (workspaceWriteToggle) workspaceWriteToggle.checked = cfg.allowWrite !== false;
   if (workspaceCommandToggle) workspaceCommandToggle.checked = cfg.allowCommand === true;
-
   if (workspaceBridgeToggle.checked) {
     await refreshWorkspaceBridgeStatus();
   } else {
@@ -830,6 +839,20 @@ async function initWorkspaceBridgeSettings(stored) {
   });
   workspaceBridgeTokenInput?.addEventListener('change', () => {
     if (workspaceBridgeToggle.checked) saveWorkspaceBridgeConfig();
+  });
+  workspaceBackendSelect?.addEventListener('change', () => {
+    if (workspaceBridgeUrlInput) {
+      const current = workspaceBridgeUrlInput.value.trim();
+      if (workspaceBackendSelect.value === 'omp-sdk-v2' && (current === 'ws://127.0.0.1:18374' || !current)) {
+        workspaceBridgeUrlInput.value = 'ws://127.0.0.1:18374/webbrain/coding';
+      } else if (workspaceBackendSelect.value === 'rust-v1' && (current === 'ws://127.0.0.1:18374/webbrain/coding' || !current)) {
+        workspaceBridgeUrlInput.value = 'ws://127.0.0.1:18374';
+      }
+    }
+    if (workspaceBridgeToggle?.checked) saveWorkspaceBridgeConfig();
+  });
+  workspacePathInput?.addEventListener('change', () => {
+    if (workspaceBridgeToggle?.checked) saveWorkspaceBridgeConfig();
   });
 
   chrome.runtime.onMessage.addListener((msg) => {

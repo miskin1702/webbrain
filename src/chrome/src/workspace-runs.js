@@ -1,17 +1,28 @@
-import { createCodingClientV2 } from './coding-client-v2.js';
+/**
+ * Background Workspace Manager & Controller.
+ *
+ * Supports dual backend architecture:
+ * - OMP SDK V2 (`omp-sdk-v2` - developer default) connecting directly to in-process coding worker
+ * - Rust Daemon V1 (`rust-v1` - fallback baseline) connecting via offscreen WebSocket
+ */
+
+import { createCodingClientV2 } from './agent/coding-client-v2.js';
 
 export const WORKSPACE_STORAGE_KEY = 'webbrainWorkspaceConfig';
-export const DEFAULT_WORKSPACE_URL = 'ws://127.0.0.1:18374';
+export const DEFAULT_WORKSPACE_URL = 'ws://127.0.0.1:18374/webbrain/coding';
+export const DEFAULT_RUST_V1_URL = 'ws://127.0.0.1:18374';
 
 export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } = {}) {
   const codingClientV2 = createCodingClientV2({ chromeApi });
+
   const config = {
     enabled: false,
     url: DEFAULT_WORKSPACE_URL,
     token: '',
     allowWrite: true,
     allowCommand: false,
-    workspaceBackend: 'rust-v1',
+    workspaceBackend: 'omp-sdk-v2', // Developer default V2
+    workspacePath: '.',
   };
 
   const state = {
@@ -29,6 +40,18 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
   // Cache: relativePath -> { revision: number, hash: string, timestamp: number }
   const fileRevisionCache = new Map();
 
+  // Wire V2 event listeners to forward events to sidepanel / background
+  codingClientV2.addEventListener((event, data) => {
+    try {
+      chromeApi.runtime.sendMessage({
+        target: 'sidepanel',
+        action: 'workspace_event',
+        event,
+        data,
+      }).catch(() => {});
+    } catch {}
+  });
+
   async function loadConfig() {
     try {
       const stored = await chromeApi.storage.local.get({
@@ -38,14 +61,18 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
           token: '',
           allowWrite: true,
           allowCommand: false,
+          workspaceBackend: 'omp-sdk-v2',
+          workspacePath: '.',
         },
       });
       const c = stored[WORKSPACE_STORAGE_KEY] || {};
       config.enabled = c.enabled === true;
-      config.url = c.url || DEFAULT_WORKSPACE_URL;
+      config.url = c.url || (c.workspaceBackend === 'rust-v1' ? DEFAULT_RUST_V1_URL : DEFAULT_WORKSPACE_URL);
       config.token = c.token || '';
       config.allowWrite = c.allowWrite !== false;
       config.allowCommand = c.allowCommand === true;
+      config.workspaceBackend = c.workspaceBackend || 'omp-sdk-v2';
+      config.workspacePath = c.workspacePath || '.';
     } catch (e) {
       console.warn('[WebBrain Workspace] Error loading stored config:', e);
     }
@@ -60,6 +87,8 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
           token: config.token,
           allowWrite: config.allowWrite,
           allowCommand: config.allowCommand,
+          workspaceBackend: config.workspaceBackend,
+          workspacePath: config.workspacePath,
         },
       });
     } catch (e) {
@@ -74,7 +103,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
       state.authenticated = false;
       state.sessionId = null;
       state.root = null;
-      return getWorkspaceStatus();
+      return await getWorkspaceStatus();
     }
     return await connectWorkspace(config);
   }
@@ -84,27 +113,51 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
     if (opts.token !== undefined) config.token = opts.token;
     if (opts.allowWrite !== undefined) config.allowWrite = opts.allowWrite === true;
     if (opts.allowCommand !== undefined) config.allowCommand = opts.allowCommand === true;
-    if (opts.workspaceBackend) config.workspaceBackend = opts.workspaceBackend;
+    if (opts.workspaceBackend) {
+      config.workspaceBackend = opts.workspaceBackend;
+    } else if (opts.url) {
+      const trimmedUrl = opts.url.trim();
+      if (trimmedUrl.includes('/webbrain/coding')) {
+        config.workspaceBackend = 'omp-sdk-v2';
+      } else if (trimmedUrl === DEFAULT_RUST_V1_URL || trimmedUrl === 'ws://127.0.0.1:18374' || trimmedUrl === 'ws://localhost:18374') {
+        config.workspaceBackend = 'rust-v1';
+      }
+    } else if (ensureOffscreen) {
+      config.workspaceBackend = 'rust-v1';
+    }
+    if (opts.path) config.workspacePath = opts.path;
     config.enabled = true;
 
     await saveConfig();
 
     if (config.workspaceBackend === 'omp-sdk-v2') {
       try {
-        const res = await codingClientV2.connect({ url: config.url, token: config.token });
-        await codingClientV2.openWorkspace(opts.path || opts.root || '.');
+        await codingClientV2.connect({ url: config.url, token: config.token });
+        const openRes = await codingClientV2.openWorkspace(config.workspacePath || opts.path || '.');
         state.connected = true;
         state.authenticated = true;
+        state.root = openRes.path || openRes.rootPath || config.workspacePath;
+        state.rootName = openRes.rootName || (state.root ? state.root.split(/[/\\]/).pop() : 'workspace');
         state.lastError = '';
-        return getWorkspaceStatus();
+
+        try {
+          const status = await getWorkspaceStatus();
+          chromeApi.runtime.sendMessage({
+            action: 'workspace_status_changed',
+            status,
+          }).catch(() => {});
+        } catch {}
+
+        return await getWorkspaceStatus();
       } catch (e) {
         state.connected = false;
         state.authenticated = false;
         state.lastError = e.message || String(e);
-        return getWorkspaceStatus();
+        return await getWorkspaceStatus();
       }
     }
 
+    // Rust V1 fallback connection flow via offscreen document
     try {
       if (typeof ensureOffscreen === 'function') {
         await ensureOffscreen();
@@ -124,12 +177,12 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
           applySession(res.status.session);
         }
       }
-      return getWorkspaceStatus();
+      return await getWorkspaceStatus();
     } catch (e) {
       state.connected = false;
       state.authenticated = false;
       state.lastError = e.message || String(e);
-      return getWorkspaceStatus();
+      return await getWorkspaceStatus();
     }
   }
 
@@ -137,14 +190,20 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
     config.enabled = false;
     await saveConfig();
 
-    try {
-      if (typeof ensureOffscreen === 'function') {
-        await ensureOffscreen();
-      }
-      await chromeApi.runtime.sendMessage({
-        action: 'workspace_bridge_stop',
-      });
-    } catch {}
+    if (config.workspaceBackend === 'omp-sdk-v2') {
+      try {
+        await codingClientV2.disconnect();
+      } catch {}
+    } else {
+      try {
+        if (typeof ensureOffscreen === 'function') {
+          await ensureOffscreen();
+        }
+        await chromeApi.runtime.sendMessage({
+          action: 'workspace_bridge_stop',
+        });
+      } catch {}
+    }
 
     state.connected = false;
     state.authenticated = false;
@@ -154,10 +213,39 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
     state.lastError = '';
     fileRevisionCache.clear();
 
-    return getWorkspaceStatus();
+    try {
+      const status = await getWorkspaceStatus();
+      chromeApi.runtime.sendMessage({
+        action: 'workspace_status_changed',
+        status,
+      }).catch(() => {});
+    } catch {}
+
+    return await getWorkspaceStatus();
   }
 
   async function getWorkspaceStatus() {
+    if (config.workspaceBackend === 'omp-sdk-v2') {
+      const v2Status = codingClientV2.getStatus();
+      return {
+        enabled: config.enabled,
+        connected: v2Status.connected,
+        authenticated: v2Status.authenticated,
+        backend: 'omp-sdk-v2',
+        sessionId: state.sessionId,
+        root: state.root || v2Status.root,
+        rootName: state.rootName || v2Status.rootName,
+        guidance: "Connected OMP SDK V2 coding worker. Use coding_delegate to delegate software engineering tasks.",
+        capabilities: ['read', 'write', 'command', 'coding_delegate'],
+        allowWrite: config.allowWrite,
+        allowCommand: config.allowCommand,
+        git: true,
+        watcherHealthy: true,
+        lastError: state.lastError,
+        v2: v2Status,
+      };
+    }
+
     try {
       if (typeof ensureOffscreen === 'function') {
         await ensureOffscreen();
@@ -180,6 +268,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
       url: config.url,
       connected: state.connected,
       authenticated: state.authenticated,
+      backend: 'rust-v1',
       sessionId: state.sessionId,
       root: state.root,
       rootName: state.rootName,
@@ -253,6 +342,9 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
   }
 
   function isConnected() {
+    if (config.workspaceBackend === 'omp-sdk-v2') {
+      return codingClientV2.isConnected();
+    }
     return state.connected === true && state.authenticated === true;
   }
 
@@ -265,14 +357,28 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
   }
 
   function root() {
+    if (config.workspaceBackend === 'omp-sdk-v2') {
+      return state.root || codingClientV2.getStatus().root;
+    }
     return state.root;
   }
 
   function rootName() {
+    if (config.workspaceBackend === 'omp-sdk-v2') {
+      return state.rootName || codingClientV2.getStatus().rootName;
+    }
     return state.rootName;
   }
 
   async function executeWorkspaceTool(name, args = {}) {
+    // 1. workspace_status immediately answers directly without falling into bridge call
+    if (name === 'workspace_status') {
+      return {
+        success: true,
+        result: await getWorkspaceStatus(),
+      };
+    }
+
     if (!isConnected()) {
       return {
         success: false,
@@ -280,7 +386,43 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
       };
     }
 
-    // Permission checks
+    // 2. OMP SDK V2 routing
+    if (config.workspaceBackend === 'omp-sdk-v2') {
+      if (name === 'coding_delegate') {
+        const res = await codingClientV2.startTask({
+          summary: args.summary,
+          instructions: args.instructions,
+          browserObservations: args.browser_observations || args.browserObservations,
+          verificationGoal: args.verification_goal || args.verificationGoal,
+        });
+        return { success: true, ...(typeof res === 'object' && res !== null ? res : {}), result: res };
+      }
+      if (name === 'coding_steer') {
+        const res = await codingClientV2.steerTask(args);
+        return { success: true, ...(typeof res === 'object' && res !== null ? res : {}), result: res };
+      }
+      if (name === 'coding_status') {
+        const res = await codingClientV2.getTaskStatus();
+        return { success: true, ...(typeof res === 'object' && res !== null ? res : {}), result: res };
+      }
+      if (name === 'coding_abort') {
+        const res = await codingClientV2.abortTask();
+        return { success: true, ...(typeof res === 'object' && res !== null ? res : {}), result: res };
+      }
+      return {
+        success: false,
+        error: `Tool ${name} is a V1 primitive; in OMP SDK V2 mode use coding_delegate instead.`,
+      };
+    }
+
+    // 3. Rust V1 fallback routing
+    if (name.startsWith('coding_')) {
+      return {
+        success: false,
+        error: `${name} requires OMP SDK V2 mode; current backend is rust-v1.`,
+      };
+    }
+
     if ((name === 'workspace_apply_patch' || name === 'workspace_create_file') && !canWrite()) {
       return {
         success: false,
@@ -299,26 +441,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
     let params;
     let timeoutMs;
 
-    if (name === 'coding_delegate') {
-      return await codingClientV2.startTask({
-        summary: args.summary,
-        instructions: args.instructions,
-        browserObservations: args.browser_observations || args.browserObservations,
-        verificationGoal: args.verification_goal || args.verificationGoal,
-      });
-    }
-    if (name === 'coding_steer') {
-      return await codingClientV2.steerTask(args.message);
-    }
-    if (name === 'coding_status') {
-      return await codingClientV2.getTaskStatus();
-    }
-    if (name === 'coding_abort') {
-      return await codingClientV2.abortTask();
-    }
-
     switch (name) {
-      case 'workspace_status':
       case 'workspace_search_code':
         method = 'workspace.search_code';
         params = {
@@ -377,32 +500,32 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
           newText: args.new_text ?? args.newText ?? undefined,
         };
         break;
+
       case 'workspace_create_file':
         method = 'workspace.create_file';
         params = {
           path: String(args.path || ''),
-          content: String(args.content ?? ''),
+          content: String(args.content || ''),
           overwrite: args.overwrite === true,
         };
         break;
 
-
       case 'workspace_git_diff':
         method = 'workspace.git_diff';
         params = {
-          paths: Array.isArray(args.paths) ? args.paths : (args.paths ? [args.paths] : undefined),
+          paths: Array.isArray(args.paths) ? args.paths : undefined,
           maxBytes: Number(args.max_bytes ?? args.maxBytes) || undefined,
         };
         break;
 
       case 'workspace_run_command':
         method = 'workspace.run_command';
-        timeoutMs = (Number(args.timeout_seconds ?? args.timeoutSeconds) || 30) * 1000;
         params = {
           command: String(args.command || ''),
           args: Array.isArray(args.args) ? args.args : undefined,
-          timeoutMs,
+          timeoutMs: Number(args.timeout_ms ?? args.timeoutMs) || undefined,
         };
+        timeoutMs = params.timeoutMs ? params.timeoutMs + 2000 : 35000;
         break;
 
       default:
@@ -424,36 +547,37 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
         timeoutMs,
       });
 
-      if (!res?.ok) {
+      if (res && res.error) {
         return {
           success: false,
-          error: res?.error || 'Workspace tool call failed.',
-          code: res?.code || 'INTERNAL_ERROR',
-          details: res?.details,
+          error: res.error.message || String(res.error),
+          code: res.error.code,
         };
       }
 
-      const result = res.result || {};
+      const result = res?.result !== undefined ? res.result : res;
 
-      // Cache updated file revisions
-      if ((name === 'workspace_read_file' || name === 'workspace_read_range') && result.path && result.revision != null) {
-        fileRevisionCache.set(result.path, {
-          revision: result.revision,
-          hash: result.hash || '',
-          timestamp: Date.now(),
-        });
-      } else if (name === 'workspace_apply_patch' && result.path && result.newRevision != null) {
-        fileRevisionCache.set(result.path, {
-          revision: result.newRevision,
-          hash: result.newHash || '',
-          timestamp: Date.now(),
-        });
-      } else if (name === 'workspace_create_file' && result.path) {
-        fileRevisionCache.delete(result.path);
-        if (result.revision != null) {
+      if (name === 'workspace_read_file' || name === 'workspace_read_range') {
+        if (result?.path && result?.revision != null) {
           fileRevisionCache.set(result.path, {
             revision: result.revision,
-            hash: result.hash || '',
+            hash: result.hash || null,
+            timestamp: Date.now(),
+          });
+        }
+      } else if (name === 'workspace_apply_patch') {
+        if (result?.path && result?.newRevision != null) {
+          fileRevisionCache.set(result.path, {
+            revision: result.newRevision,
+            hash: result.newHash || null,
+            timestamp: Date.now(),
+          });
+        }
+      } else if (name === 'workspace_create_file') {
+        if (result?.path && result?.revision != null) {
+          fileRevisionCache.set(result.path, {
+            revision: result.revision,
+            hash: result.hash || null,
             timestamp: Date.now(),
           });
         }
@@ -461,7 +585,8 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
 
       return {
         success: true,
-        ...result,
+        ...(typeof result === 'object' && result !== null ? result : {}),
+        result,
       };
     } catch (err) {
       return {
@@ -477,6 +602,10 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
     getWorkspaceStatus,
     executeWorkspaceTool,
     executeTool: executeWorkspaceTool,
+    workspaceBackend: () => config.workspaceBackend,
+    getConfig: () => ({ ...config }),
+    saveConfig,
+    loadConfig,
     handleWorkspaceEvent,
     handleWorkspaceConnected,
     handleWorkspaceDisconnected,

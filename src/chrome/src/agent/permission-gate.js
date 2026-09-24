@@ -148,6 +148,10 @@ export const UNTRUSTED_CONTENT_TOOLS = new Set([
   'workspace_create_file',
   'workspace_git_diff',
   'workspace_run_command',
+  'coding_delegate',
+  'coding_steer',
+  'coding_status',
+  'coding_abort',
 ]);
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -438,6 +442,9 @@ const TOOL_CAPABILITY = {
   workspace_apply_patch: Capability.WORKSPACE_WRITE,
   workspace_create_file: Capability.WORKSPACE_WRITE,
   workspace_run_command: Capability.WORKSPACE_COMMAND,
+  coding_delegate: Capability.WORKSPACE_WRITE,
+  coding_steer: Capability.WORKSPACE_WRITE,
+  coding_abort: Capability.WORKSPACE_WRITE,
 };
 
 /**

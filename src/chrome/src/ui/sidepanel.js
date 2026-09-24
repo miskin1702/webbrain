@@ -9590,6 +9590,20 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.target !== 'sidepanel') return;
   if (['workspace_event', 'workspace_connected', 'workspace_disconnected'].includes(msg.action)) {
     void updateWorkspaceBadge();
+    if (msg.action === 'workspace_event') {
+      const { event, data } = msg;
+      if (event === 'coding.progress') {
+        const desc = data?.message || data?.state;
+        if (desc) showActivity(`Coding: ${desc}`);
+      } else if (event === 'coding.verification_requested') {
+        showComposerToast('Code changes ready for browser verification', { duration: 6000 });
+      } else if (event === 'coding.completed') {
+        showActivity(t('tool.done'));
+        showComposerToast(`Coding completed: ${data?.summary || 'Changes verified.'}`, { duration: 5000 });
+      } else if (event === 'coding.failed') {
+        showComposerToast(`Coding failed: ${data?.error || 'Task failed.'}`, { duration: 7000 });
+      }
+    }
   }
 });
 

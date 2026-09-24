@@ -1719,10 +1719,22 @@
                 <span class="toggle-slider"></span>
               </label>
             </div>
+            <label class="cloud-bridge-url-field" for="select-workspace-backend">
+              <span class="cloud-bridge-url-label">Workspace Backend</span>
+              <select class="setting-input" id="select-workspace-backend" style="width:100%;height:32px;padding:4px 8px;border-radius:4px;">
+                <option value="omp-sdk-v2">OMP SDK Coding Worker (V2 - Default)</option>
+                <option value="rust-v1">Rust Local Daemon (V1 - Fallback)</option>
+              </select>
+            </label>
+            <label class="cloud-bridge-url-field" for="input-workspace-path">
+              <span class="cloud-bridge-url-label">Workspace Project Root Path</span>
+              <input class="setting-input" type="text" id="input-workspace-path" autocomplete="off" spellcheck="false"
+                     placeholder=". or absolute path (e.g. C:\Projects\app)">
+            </label>
             <label class="cloud-bridge-url-field" for="input-workspace-bridge-url">
               <span class="cloud-bridge-url-label">Bridge URL</span>
               <input class="setting-input" type="text" id="input-workspace-bridge-url" inputmode="url" autocomplete="off" spellcheck="false"
-                     placeholder="ws://127.0.0.1:18374">
+                     placeholder="ws://127.0.0.1:18374/webbrain/coding">
             </label>
             <label class="cloud-bridge-url-field" for="input-workspace-bridge-token">
               <span class="cloud-bridge-url-label">Pairing Token</span>

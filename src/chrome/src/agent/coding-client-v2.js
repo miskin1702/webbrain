@@ -87,12 +87,13 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
         return;
       }
 
+      const timeoutMs = config.timeoutMs || 4000;
       const timeout = setTimeout(() => {
         if (!authenticated && epoch === connectionEpoch) {
           try { ws.close(); } catch {}
-          reject(new Error('OMP SDK V2 coding connection timeout after 10000ms'));
+          reject(new Error(`OMP SDK V2 coding connection timeout after ${timeoutMs}ms`));
         }
-      }, 10000);
+      }, timeoutMs);
 
       ws.onopen = () => {
         connected = true;
@@ -143,7 +144,7 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
             if (type === 'host.error' || payload.error) {
               req.reject(new Error(payload.error || 'Unknown host error'));
             } else {
-              req.resolve(payload);
+              req.resolve({ type, ...payload });
             }
             return;
           }

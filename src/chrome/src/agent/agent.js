@@ -2,7 +2,7 @@ import { JEV_FAST_KEYS, JEV_CLASSIFIER_THRESHOLD, JEV_BROWSER_THRESHOLD, confide
 import { redactSystemOneText, wrapSystemOneData } from './systemone-evidence.js';
 import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailureReason, SYSTEM_ONE_COST_PROVIDER } from './systemone-judge.js';
 import { SOCIAL_PLATFORMS, socialPublicationApiPlatform, normalizePublicationContract, publicationProgress, exactPublicationText, publicationMediaMatches, publicationContractMessages, publicationAuditMessages, publicationAuditAccepted } from './social-publish-contract.js';
-import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_DEV_APPENDIX, SYSTEM_PROMPT_WEBMCP_ASK, SYSTEM_PROMPT_WEBMCP_ACT, SYSTEM_PROMPT_WORKSPACE } from './tools.js';
+import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_DEV_APPENDIX, SYSTEM_PROMPT_WEBMCP_ASK, SYSTEM_PROMPT_WEBMCP_ACT, SYSTEM_PROMPT_WORKSPACE, SYSTEM_PROMPT_OMP_CODING_V2 } from './tools.js';
 import { validateToolArguments } from './tool-arguments.js';
 import { isSessionQuotaError, serializeConversationForSession, SESSION_CONVERSATION_BUDGET_BYTES, SESSION_CONVERSATION_RETRY_BUDGET_BYTES } from './conversation-persistence.js';
 import { formatErrorMessage } from '../error-format.js';
@@ -24975,9 +24975,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     if (workspaceConnected) {
       const workspaceRootName = this._workspaceRootName || this._workspaceClient?.rootName?.() || 'project';
       const workspaceRoot = this._workspaceRoot || this._workspaceClient?.root?.() || '.';
-      prompt += `\n\nConnected local workspace root: "${workspaceRootName}" (${workspaceRoot}). All tool paths are relative to this root (use "." for root).\n\n${SYSTEM_PROMPT_WORKSPACE}`;
+      const isV2 = (this._workspaceClient?.workspaceBackend?.() || 'omp-sdk-v2') === 'omp-sdk-v2';
+      const workspacePrompt = isV2 ? SYSTEM_PROMPT_OMP_CODING_V2 : SYSTEM_PROMPT_WORKSPACE;
+      prompt += `\n\nConnected local workspace root: "${workspaceRootName}" (${workspaceRoot}). All tool paths are relative to this root (use "." for root).\n\n${workspacePrompt}`;
     }
-
     // Universal cookie/paywall guidance. Always relevant for http(s)
     // browsing; cheap enough to carry on chrome:///file:// pages too
     // since it's just a few dozen cached tokens.
@@ -42050,6 +42051,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       workspaceConnected: this._workspaceClient?.isConnected?.() === true,
       workspaceCanWrite: this._workspaceClient?.canWrite?.() === true,
       workspaceCanCommand: this._workspaceClient?.canCommand?.() === true,
+      workspaceBackend: this._workspaceClient?.workspaceBackend?.() || 'omp-sdk-v2',
     });
     // The selected text is already present in the trusted run envelope.
     // Advertising page/network tools would let an injected selection induce a
@@ -42297,6 +42299,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         workspaceConnected: this._workspaceClient?.isConnected?.() === true,
         workspaceCanWrite: this._workspaceClient?.canWrite?.() === true,
         workspaceCanCommand: this._workspaceClient?.canCommand?.() === true,
+        workspaceBackend: this._workspaceClient?.workspaceBackend?.() || 'omp-sdk-v2',
       });
       if (selectionOnly || standaloneChatRun) tools = [];
       if (forceCompletionVerificationTurn) {
@@ -43371,6 +43374,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       workspaceConnected: this._workspaceClient?.isConnected?.() === true,
       workspaceCanWrite: this._workspaceClient?.canWrite?.() === true,
       workspaceCanCommand: this._workspaceClient?.canCommand?.() === true,
+      workspaceBackend: this._workspaceClient?.workspaceBackend?.() || 'omp-sdk-v2',
     });
     // Match the non-streaming path: selection-grounded turns are tool-free so
     // page or network content cannot be introduced after the source anchor.
@@ -43454,6 +43458,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         workspaceConnected: this._workspaceClient?.isConnected?.() === true,
         workspaceCanWrite: this._workspaceClient?.canWrite?.() === true,
         workspaceCanCommand: this._workspaceClient?.canCommand?.() === true,
+        workspaceBackend: this._workspaceClient?.workspaceBackend?.() || 'omp-sdk-v2',
       });
       if (selectionOnly || standaloneChatRun) tools = [];
       if (forceCompletionVerificationTurn) {
