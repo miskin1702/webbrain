@@ -783,7 +783,7 @@ async function saveWorkspaceBridgeConfig() {
   const defaultUrl = workspaceBackend === 'rust-v1' ? 'ws://127.0.0.1:18374' : 'ws://127.0.0.1:18374/webbrain/coding';
   const url = workspaceBridgeUrlInput?.value?.trim() || defaultUrl;
   const token = workspaceBridgeTokenInput?.value?.trim() || '';
-  const workspacePath = workspacePathInput?.value?.trim() || '.';
+  const workspacePath = workspacePathInput?.value?.trim() || '';
   const allowWrite = workspaceWriteToggle?.checked !== false;
   const allowCommand = workspaceCommandToggle?.checked === true;
 
@@ -814,7 +814,7 @@ async function initWorkspaceBridgeSettings(stored) {
   const defaultUrl = cfg.workspaceBackend === 'rust-v1' ? 'ws://127.0.0.1:18374' : 'ws://127.0.0.1:18374/webbrain/coding';
   workspaceBridgeToggle.checked = cfg.enabled === true;
   if (workspaceBackendSelect) workspaceBackendSelect.value = cfg.workspaceBackend || 'omp-sdk-v2';
-  if (workspacePathInput) workspacePathInput.value = cfg.workspacePath || '.';
+  if (workspacePathInput) workspacePathInput.value = cfg.workspacePath || '';
   workspaceBridgeUrlInput.value = cfg.url || defaultUrl;
   if (workspaceBridgeTokenInput) workspaceBridgeTokenInput.value = cfg.token || '';
   if (workspaceWriteToggle) workspaceWriteToggle.checked = cfg.allowWrite !== false;

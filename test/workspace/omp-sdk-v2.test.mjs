@@ -228,8 +228,8 @@ test('live contract verification: codingClientV2 connects to actual Portable OMP
     assert.strictEqual(client.isConnected(), true);
     assert.strictEqual(connectRes.session?.server?.name, 'portable-omp-gateway');
 
-    // 2. Open Workspace
-    const openRes = await client.openWorkspace('.');
+    // 2. Open Workspace with absolute root path
+    const openRes = await client.openWorkspace(API_DIR);
     assert.ok(openRes.workspaceId);
     assert.strictEqual(client.getStatus().connected, true);
     assert.strictEqual(client.getStatus().authenticated, true);

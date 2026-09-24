@@ -22,7 +22,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
     allowWrite: true,
     allowCommand: false,
     workspaceBackend: 'omp-sdk-v2', // Developer default V2
-    workspacePath: '.',
+    workspacePath: '',
   };
 
   const state = {
@@ -62,7 +62,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
           allowWrite: true,
           allowCommand: false,
           workspaceBackend: 'omp-sdk-v2',
-          workspacePath: '.',
+          workspacePath: '',
         },
       });
       const c = stored[WORKSPACE_STORAGE_KEY] || {};
@@ -72,7 +72,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
       config.allowWrite = c.allowWrite !== false;
       config.allowCommand = c.allowCommand === true;
       config.workspaceBackend = c.workspaceBackend || 'omp-sdk-v2';
-      config.workspacePath = c.workspacePath || '.';
+      config.workspacePath = c.workspacePath || '';
     } catch (e) {
       console.warn('[WebBrain Workspace] Error loading stored config:', e);
     }
@@ -131,12 +131,20 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
     await saveConfig();
 
     if (config.workspaceBackend === 'omp-sdk-v2') {
+      const targetPath = config.workspacePath || opts.workspacePath || opts.path || '';
+      if (!targetPath || targetPath === '.' || !(/^[a-zA-Z]:[/\\]|^\//.test(targetPath))) {
+        state.connected = false;
+        state.authenticated = false;
+        state.lastError = 'Workspace project root must be an absolute path (e.g. C:\\Projects\\app)';
+        return await getWorkspaceStatus();
+      }
+
       try {
         await codingClientV2.connect({ url: config.url, token: config.token });
-        const openRes = await codingClientV2.openWorkspace(config.workspacePath || opts.path || '.');
+        const openRes = await codingClientV2.openWorkspace(targetPath);
         state.connected = true;
         state.authenticated = true;
-        state.root = openRes.path || openRes.rootPath || config.workspacePath;
+        state.root = openRes.path || openRes.rootPath || targetPath;
         state.rootName = openRes.rootName || (state.root ? state.root.split(/[/\\]/).pop() : 'workspace');
         state.lastError = '';
 
