@@ -160,3 +160,80 @@ fn test_search_code_with_context_lines() {
     assert!(snippet.contains("target_function()"));
     assert!(snippet.contains("line 2 after"));
 }
+
+#[test]
+fn test_search_code_context_lines_capping_and_boundaries() {
+    let temp = tempdir().unwrap();
+    let sandbox = PathSandbox::new(temp.path()).unwrap();
+
+    // Create a 25-line file
+    let mut file_content = String::new();
+    for i in 1..=25 {
+        file_content.push_str(&format!("line {}\n", i));
+    }
+    file_content.push_str("target_marker_func()\n");
+    for i in 27..=30 {
+        file_content.push_str(&format!("line {}\n", i));
+    }
+
+    let file_path = temp.path().join("boundary.rs");
+    fs::write(&file_path, &file_content).unwrap();
+
+    // 1. Test request with context_lines: Some(50) (much larger than MAX_CONTEXT_LINES = 10)
+    let params_capped = SearchCodeParams {
+        query: "target_marker_func".to_string(),
+        limit: Some(10),
+        is_regex: Some(false),
+        case_sensitive: Some(false),
+        include: None,
+        exclude: None,
+        context_lines: Some(50),
+    };
+
+    let res_capped = search_code(&sandbox, &params_capped).unwrap();
+    assert_eq!(res_capped.matches.len(), 1);
+    let snippet_capped = res_capped.matches[0].snippet.as_ref().unwrap();
+    let snippet_lines: Vec<&str> = snippet_capped.lines().collect();
+    // MAX_CONTEXT_LINES is 10, so max lines = 2 * 10 + 1 = 21 lines max.
+    assert!(snippet_lines.len() <= 21);
+    assert!(snippet_lines.contains(&"target_marker_func()"));
+
+    // 2. Test start-of-file boundary (match at line 2, context 5)
+    let file_path_start = temp.path().join("start.rs");
+    fs::write(&file_path_start, "line 1 start\nmatch_start_line\nline 3 after\n").unwrap();
+    let params_start = SearchCodeParams {
+        query: "match_start_line".to_string(),
+        limit: Some(10),
+        is_regex: Some(false),
+        case_sensitive: Some(false),
+        include: None,
+        exclude: None,
+        context_lines: Some(5),
+    };
+    let res_start = search_code(&sandbox, &params_start).unwrap();
+    assert_eq!(res_start.matches.len(), 1);
+    let snippet_start = res_start.matches[0].snippet.as_ref().unwrap();
+    let start_lines: Vec<&str> = snippet_start.lines().collect();
+    // Should start at line 1 without underflowing or including negative lines
+    assert_eq!(start_lines[0], "line 1 start");
+    assert_eq!(start_lines[1], "match_start_line");
+
+    // 3. Test end-of-file boundary (match near end of file)
+    let file_path_end = temp.path().join("end.rs");
+    fs::write(&file_path_end, "line 1 before\nmatch_end_line\nline 3 end\n").unwrap();
+    let params_end = SearchCodeParams {
+        query: "match_end_line".to_string(),
+        limit: Some(10),
+        is_regex: Some(false),
+        case_sensitive: Some(false),
+        include: None,
+        exclude: None,
+        context_lines: Some(5),
+    };
+    let res_end = search_code(&sandbox, &params_end).unwrap();
+    assert_eq!(res_end.matches.len(), 1);
+    let snippet_end = res_end.matches[0].snippet.as_ref().unwrap();
+    let end_lines: Vec<&str> = snippet_end.lines().collect();
+    // Should terminate at end of file without overflowing
+    assert_eq!(end_lines.last().unwrap(), &"line 3 end");
+}

@@ -63,11 +63,11 @@ Rather than turning WebBrain into an IDE or terminal emulator, the Workspace Bri
 ### The Coding Loop
 
 1. **Inspect Status**: Call `workspace_status` to confirm the authorized root and active capabilities.
-2. **Search Before Reading**: Use `workspace_search_code` to locate exact definitions, symbols, or files.
+2. **Search Before Reading**: Use `workspace_search_code` to locate exact definitions, symbols, or files, with optional `context_lines` capped at 10 surrounding context lines.
 3. **Read Narrow Ranges**: Use `workspace_read_range` to fetch specific line ranges with revision numbers and content hashes.
-4. **Apply Targeted Patch**: Apply changes with `workspace_apply_patch`, providing `expected_revision` to prevent overwriting concurrent edits.
+4. **Apply Targeted Patch**: Apply changes with `workspace_apply_patch`, providing `expected_revision` to prevent overwriting concurrent edits; supports multi-hunk shifts, blank context lines, and ambiguous context rejection.
 5. **Inspect Git Diff**: Immediately call `workspace_git_diff` to review modifications and verify hunks.
-6. **Focused Validation**: If authorized, run the narrowest relevant test or linter via `workspace_run_command`.
+6. **Focused Validation**: If authorized, run the narrowest relevant test or linter via `workspace_run_command`, which enforces closed stdin, separated arguments for safe Windows `.cmd`/`.bat` resolution without shell concatenation, and bounded output retaining 10 KB head + 40 KB tail.
 7. **Handle Revision Conflicts**: If an edit is rejected due to an external change (`REVISION_CONFLICT`), re-read the range and re-apply cleanly.
 
 ---
@@ -82,7 +82,7 @@ Local filesystem access is a critical security boundary. The Workspace Bridge en
 - **Traversal Rejection**: Relative paths containing `..` or leading slashes are rejected. After resolving, target paths must strictly start with the authorized root.
 - **Symlink & Junction Defense**: Windows junctions, NTFS reparse points, and symlinks are resolved to their target destination. Any link pointing outside the authorized root is rejected with `PATH_OUTSIDE_WORKSPACE`.
 - **Reserved DOS Device Names**: Rejects Windows reserved names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, with or without extensions) to prevent hangs or denial-of-service.
-- **Binary File Quarantine**: Edit and read tools only operate on text files. The first 8 KB of any opened file are inspected for null bytes (`0x00`) or invalid UTF-8.
+- **Strict Text & UTF-8 Validation**: File reads, ranges, and edit inputs/read-before-write reject invalid UTF-8 and null bytes (`0x00`) across the full file.
 
 ### 2.2 Localhost Pairing & Handshake
 - **Loopback-Only Binding**: The daemon strictly binds to `127.0.0.1` (or `::1`). It never listens on LAN interfaces or `0.0.0.0`.
@@ -97,7 +97,7 @@ Connecting a workspace does not grant blanket write or shell access:
 
 ### 2.4 Prompt Injection Defense (`UNTRUSTED_CONTENT_TOOLS`)
 All workspace outputs—file contents, diffs, search results, and command stdout/stderr—carry user/attacker-controllable text.
-- All 7 workspace tools are registered in `UNTRUSTED_CONTENT_TOOLS` in `permission-gate.js`.
+- All 10 workspace tools are registered in `UNTRUSTED_CONTENT_TOOLS` in `permission-gate.js`.
 - Outputs are sealed with `<untrusted_page_content id="<nonce>">` before entering LLM context.
 - Breakout attempts and fake boundary tags inside source files are neutralized.
 

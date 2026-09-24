@@ -10,8 +10,8 @@ use std::path::Path;
 pub const DEFAULT_SEARCH_LIMIT: usize = 50;
 pub const MAX_SEARCH_LIMIT: usize = 200;
 pub const MAX_LINE_CHARS: usize = 250;
+pub const MAX_CONTEXT_LINES: usize = 10;
 pub const MAX_SEARCH_FILE_SIZE: u64 = 2 * 1024 * 1024; // 2 MB
-
 #[derive(Debug, Clone)]
 pub enum SearchError {
     InvalidRegex(String),
@@ -163,8 +163,9 @@ pub fn search_code(
                         line.clone()
                     };
 
-                    let snippet = if let Some(c) = params.context_lines {
-                        if c > 0 {
+                    let snippet = if let Some(c_raw) = params.context_lines {
+                        if c_raw > 0 {
+                            let c = c_raw.min(MAX_CONTEXT_LINES);
                             let start = line_idx.saturating_sub(c);
                             let end = std::cmp::min(lines.len() - 1, line_idx + c);
                             let snippet_lines: Vec<String> = lines[start..=end]

@@ -194,7 +194,7 @@ fn apply_unified_diff(
                 } else if let Some(stripped) = hline.strip_prefix('+') {
                     hunk_new.push(stripped);
                     total_added += 1;
-                } else if *hline == "" {
+                } else if hline.is_empty() {
                     // Empty context line in unified diff
                     hunk_old.push("");
                     hunk_new.push("");
@@ -212,8 +212,7 @@ fn apply_unified_diff(
                 0
             };
 
-            let match_idx =
-                find_hunk_match(&result_lines, &hunk_old, min_match_idx, expected_idx)?;
+            let match_idx = find_hunk_match(&result_lines, &hunk_old, min_match_idx, expected_idx)?;
 
             // Replace hunk_old lines with hunk_new lines
             let mut next_result = Vec::with_capacity(
