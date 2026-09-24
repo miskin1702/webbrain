@@ -286,12 +286,26 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
     let params;
     let timeoutMs;
 
+    if (name === 'coding_delegate') {
+      return await codingClientV2.startTask({
+        summary: args.summary,
+        instructions: args.instructions,
+        browserObservations: args.browser_observations || args.browserObservations,
+        verificationGoal: args.verification_goal || args.verificationGoal,
+      });
+    }
+    if (name === 'coding_steer') {
+      return await codingClientV2.steerTask(args.message);
+    }
+    if (name === 'coding_status') {
+      return await codingClientV2.getTaskStatus();
+    }
+    if (name === 'coding_abort') {
+      return await codingClientV2.abortTask();
+    }
+
     switch (name) {
       case 'workspace_status':
-        method = 'workspace.status';
-        params = {};
-        break;
-
       case 'workspace_search_code':
         method = 'workspace.search_code';
         params = {
