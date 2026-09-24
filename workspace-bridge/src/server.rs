@@ -271,11 +271,18 @@ async fn dispatch_method(state: &ServerState, req: RpcRequest) -> RpcResponse {
     match req.method.as_str() {
         "workspace.status" => {
             let is_git = is_git_repository(state.sandbox.canonical_root());
+            let root_display = state.sandbox.canonical_root().display().to_string();
+            let root_name = state.session.root_name.clone();
+            let guidance = format!(
+                "The workspace root is '{}' ({}). Use '.' for the root directory itself. All relative paths start from this root.",
+                root_name, root_display
+            );
             let status = WorkspaceStatusResult {
                 connected: true,
                 session_id: state.session.session_id.clone(),
-                root: state.sandbox.canonical_root().display().to_string(),
-                root_name: state.session.root_name.clone(),
+                root: root_display,
+                root_name,
+                guidance: Some(guidance),
                 read: true,
                 write: state.session.allow_write,
                 command: state.session.allow_command,
@@ -1130,5 +1137,7 @@ mod tests {
         assert!(val.read);
         assert!(val.write);
         assert!(!val.command);
+        assert!(val.guidance.is_some());
+        assert!(val.guidance.unwrap().contains("The workspace root is"));
     }
 }

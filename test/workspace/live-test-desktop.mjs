@@ -166,20 +166,30 @@ async function run() {
   assert.ok(searchResp.result.matches.some(m => m.path.includes('selam.md')), 'Match should be in selam.md');
   console.log('✓ workspace.search_code found match in selam.md.');
 
-  // 7. workspace.list_dir
-  console.log('Listing directory via workspace.list_dir on "."...');
-  const listResp = await client.request('workspace.list_dir', { path: '.' });
-  console.log('list_dir response:', JSON.stringify(listResp));
-  assert.equal(listResp.ok, true, `list_dir failed: ${JSON.stringify(listResp.error)}`);
-  assert.ok(Array.isArray(listResp.result.entries), 'Expected entries array');
-  const entryNames = listResp.result.entries.map(e => e.name);
-  for (const expectedFile of ['selam.md', 'selam_patch.md', 'test.md', 'webbrain-workspace.exe']) {
-    assert.ok(
-      entryNames.includes(expectedFile),
-      `Expected ${expectedFile} in list_dir entries, got: ${entryNames.join(', ')}`
-    );
+  // 7. workspace.list_dir accepts both the canonical root path and root-name alias
+  const expectedRootFiles = ['selam.md', 'selam_patch.md', 'test.md', 'webbrain-workspace.exe'];
+  let canonicalRootEntries = null;
+  for (const rootPath of ['test', '.']) {
+    console.log(`Listing directory via workspace.list_dir on "${rootPath}"...`);
+    const listResp = await client.request('workspace.list_dir', { path: rootPath });
+    console.log(`list_dir "${rootPath}" response:`, JSON.stringify(listResp));
+    assert.equal(listResp.ok, true, `list_dir "${rootPath}" failed: ${JSON.stringify(listResp.error)}`);
+    assert.equal(listResp.error, undefined, `list_dir "${rootPath}" returned an unexpected error`);
+    assert.ok(Array.isArray(listResp.result.entries), `Expected entries array for "${rootPath}"`);
+    const entryNames = listResp.result.entries.map(e => e.name).sort();
+    for (const expectedFile of expectedRootFiles) {
+      assert.ok(
+        entryNames.includes(expectedFile),
+        `Expected ${expectedFile} in list_dir "${rootPath}" entries, got: ${entryNames.join(', ')}`
+      );
+    }
+    if (canonicalRootEntries) {
+      assert.deepEqual(entryNames, canonicalRootEntries, 'Root-name alias and "." must return the same root listing');
+    } else {
+      canonicalRootEntries = entryNames;
+    }
   }
-  console.log('✓ workspace.list_dir returned selam.md, selam_patch.md, test.md, webbrain-workspace.exe.');
+  console.log('✓ workspace.list_dir returned the root listing for both "test" and "." with 0 errors.');
 
   // 8. workspace.glob
   console.log('Finding files via workspace.glob with pattern "*.md"...');

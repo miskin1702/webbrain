@@ -77,18 +77,14 @@ pub struct TextReadResult {
     pub line_ending: LineEnding,
 }
 
-/// Inspect if bytes are valid UTF-8 and contain no null bytes.
+/// Inspect if bytes are valid UTF-8 and contain no null bytes anywhere.
 pub fn is_text(bytes: &[u8]) -> bool {
-    // Check first 8 KB for null bytes (typical binary marker)
-    let sample_len = bytes.len().min(8192);
-    let sample = &bytes[..sample_len];
-
-    // Check null bytes (excluding potential UTF-16, but we only accept UTF-8 for editing)
-    if sample.contains(&0) {
+    // Reject null bytes anywhere in file (binary marker)
+    if bytes.contains(&0) {
         return false;
     }
 
-    // Verify valid UTF-8
+    // Verify valid UTF-8 across entire file (excluding optional UTF-8 BOM)
     let bytes_without_bom = if bytes.starts_with(UTF8_BOM) {
         &bytes[UTF8_BOM.len()..]
     } else {
@@ -156,7 +152,10 @@ pub fn read_text_file(path: &Path, max_chars: Option<usize>) -> Result<TextReadR
         &raw_bytes[..]
     };
 
-    let full_text = String::from_utf8_lossy(text_slice).to_string();
+    let full_text = match std::str::from_utf8(text_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => return Err(FileError::NotTextFile(path.display().to_string())),
+    };
     let line_ending = detect_line_ending(&full_text);
     let total_lines = full_text.lines().count().max(1);
 
@@ -391,5 +390,32 @@ mod tests {
         let text = "Line 1\nLine 2\r\nLine 3\n";
         let normalized = normalize_line_endings(text, LineEnding::CrLf);
         assert_eq!(normalized, "Line 1\r\nLine 2\r\nLine 3\r\n");
+    }
+
+    #[test]
+    fn test_rejects_invalid_utf8() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("invalid_utf8.bin");
+
+        // Write valid UTF-8 preamble followed by invalid UTF-8 sequence past 8 KB
+        let mut data = vec![b'a'; 8200];
+        data.extend_from_slice(&[0xFF, 0xFE, 0xFD]); // Invalid UTF-8 bytes
+        std::fs::write(&target, &data).unwrap();
+
+        let err = read_text_file(&target, None).unwrap_err();
+        assert!(matches!(err, FileError::NotTextFile(_)));
+    }
+
+    #[test]
+    fn test_rejects_null_byte_past_sample_window() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("late_null.bin");
+
+        let mut data = vec![b'x'; 9000];
+        data[8500] = 0x00; // Null byte past 8 KB
+        std::fs::write(&target, &data).unwrap();
+
+        let err = read_text_file(&target, None).unwrap_err();
+        assert!(matches!(err, FileError::NotTextFile(_)));
     }
 }

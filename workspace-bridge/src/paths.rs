@@ -113,7 +113,43 @@ impl PathSandbox {
             // Treat as relative to canonical root
             // Strip any leading slashes or prefixes like .\
             let rel = strip_leading_slashes(path_obj);
-            self.canonical_root.join(rel)
+            let mut target = self.canonical_root.join(&rel);
+
+            if !target.exists() {
+                let root_name = self
+                    .canonical_root
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+
+                if !root_name.is_empty() {
+                    let rel_str = rel.to_string_lossy();
+                    let trimmed_rel = rel_str.trim_matches(['/', '\\']);
+
+                    if trimmed_rel.eq_ignore_ascii_case(root_name) {
+                        return Ok(self.canonical_root.clone());
+                    }
+
+                    if trimmed_rel.len() > root_name.len()
+                        && trimmed_rel[..root_name.len()].eq_ignore_ascii_case(root_name)
+                    {
+                        let next_char = trimmed_rel.as_bytes()[root_name.len()];
+                        if next_char == b'/' || next_char == b'\\' {
+                            let stripped = &trimmed_rel[root_name.len() + 1..];
+                            let stripped_target = self.canonical_root.join(stripped);
+                            let parent_ok = stripped_target
+                                .parent()
+                                .map(|p| p.exists() && is_subpath(p, &self.canonical_root))
+                                .unwrap_or(false);
+                            if stripped_target.exists() || parent_ok {
+                                target = stripped_target;
+                            }
+                        }
+                    }
+                }
+            }
+
+            target
         };
 
         // If the target exists, canonicalize it to resolve all symlinks and junctions

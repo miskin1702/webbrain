@@ -24971,8 +24971,11 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       const webMcpPrompt = this._isActionMode(mode) ? SYSTEM_PROMPT_WEBMCP_ACT : SYSTEM_PROMPT_WEBMCP_ASK;
       prompt += `\n\n${webMcpPrompt}`;
     }
-    if (this._workspaceClient?.isConnected?.()) {
-      prompt += `\n\n${SYSTEM_PROMPT_WORKSPACE}`;
+    const workspaceConnected = this._workspaceClient?.isConnected?.() === true;
+    if (workspaceConnected) {
+      const workspaceRootName = this._workspaceRootName || this._workspaceClient?.rootName?.() || 'project';
+      const workspaceRoot = this._workspaceRoot || this._workspaceClient?.root?.() || '.';
+      prompt += `\n\nConnected local workspace root: "${workspaceRootName}" (${workspaceRoot}). All tool paths are relative to this root (use "." for root).\n\n${SYSTEM_PROMPT_WORKSPACE}`;
     }
 
     // Universal cookie/paywall guidance. Always relevant for http(s)

@@ -52,6 +52,10 @@ export const WORKSPACE_SEARCH_CODE_TOOL = {
           items: { type: 'string' },
           description: 'Optional glob patterns to exclude in addition to .gitignore.',
         },
+        context_lines: {
+          type: 'integer',
+          description: 'Optional number of surrounding context lines to include before and after each match in snippet.',
+        },
       },
       required: ['query'],
     },
@@ -297,7 +301,9 @@ export const WORKSPACE_TOOLS = WORKSPACE_ALL_TOOLS;
 export const WORKSPACE_TOOL_NAMES = new Set(WORKSPACE_ALL_TOOLS.map(t => t.function.name));
 export const WORKSPACE_READ_TOOL_NAMES = new Set(WORKSPACE_READ_TOOLS.map(t => t.function.name));
 
-export const WORKSPACE_CODING_PROMPT_GUIDANCE = `- To inspect, list, or explore what files exist in a directory or project, ALWAYS use \`workspace_list_dir\` or \`workspace_glob\`. NEVER run \`workspace_run_command('dir')\` or \`workspace_run_command('ls')\` and NEVER search dummy characters to discover files.
+export const WORKSPACE_CODING_PROMPT_GUIDANCE = `- WORKSPACE ROOT: The connected project root IS the base directory. All paths in workspace tools are relative to this root (use "." to refer to the project root itself). When the user mentions the project or folder by name (e.g. "test dizini", "webbrain projesi"), they are referring to the workspace root (".") — DO NOT pass the root folder name as a subfolder unless explicitly asked for a nested subfolder.
+- To list or explore files in the project or directory, call \`workspace_list_dir({ path: "." })\` or \`workspace_glob({ pattern: "*" })\`.
+- To inspect, list, or explore what files exist in a directory or project, ALWAYS use \`workspace_list_dir\` or \`workspace_glob\`. NEVER run \`workspace_run_command('dir')\` or \`workspace_run_command('ls')\` and NEVER search dummy characters to discover files.
 - To create new files, use \`workspace_create_file\` or \`workspace_apply_patch\`.
 - To search code contents, use \`workspace_search_code\`.
 - To read file contents, use \`workspace_read_range\` or \`workspace_read_file\`.`;

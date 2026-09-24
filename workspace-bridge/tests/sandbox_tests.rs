@@ -102,3 +102,48 @@ fn test_sandbox_symlink_escape_rejection() {
         assert!(matches!(err, SandboxError::PathOutsideWorkspace(_)));
     }
 }
+
+#[test]
+fn test_sandbox_root_name_alias_resolution() {
+    let temp = tempdir().unwrap();
+    let root_path = temp.path();
+    let root_name = root_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .expect("tempdir has valid name");
+
+    let sandbox = PathSandbox::new(root_path).unwrap();
+
+    // 1. sandbox.resolve("test") when root name is "test" returns canonical root
+    let resolved_root = sandbox.resolve(root_name).unwrap();
+    assert_eq!(resolved_root, *sandbox.canonical_root());
+
+    // Leading/trailing slashes or dot-slash
+    let resolved_dot = sandbox.resolve(&format!("./{root_name}")).unwrap();
+    assert_eq!(resolved_dot, *sandbox.canonical_root());
+
+    let resolved_slash = sandbox.resolve(&format!("{root_name}/")).unwrap();
+    assert_eq!(resolved_slash, *sandbox.canonical_root());
+
+    // 2. sandbox.resolve("test/subfile.txt") resolves to canonical_root.join("subfile.txt")
+    let subfile = root_path.join("subfile.txt");
+    fs::write(&subfile, "content").unwrap();
+
+    let resolved_sub = sandbox.resolve(&format!("{root_name}/subfile.txt")).unwrap();
+    assert_eq!(
+        resolved_sub,
+        dunce::canonicalize(&subfile).unwrap_or(subfile.clone())
+    );
+
+    // Backslash variant
+    let resolved_bs = sandbox.resolve(&format!(r"{root_name}\subfile.txt")).unwrap();
+    assert_eq!(
+        resolved_bs,
+        dunce::canonicalize(&subfile).unwrap_or(subfile)
+    );
+
+    // Resolving a non-existent file for writing with root prefix
+    let new_file_rel = format!("{root_name}/new_file.txt");
+    let resolved_new = sandbox.resolve(&new_file_rel).unwrap();
+    assert_eq!(resolved_new, sandbox.canonical_root().join("new_file.txt"));
+}

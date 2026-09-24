@@ -170,6 +170,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
       sessionId: state.sessionId,
       root: state.root,
       rootName: state.rootName,
+      guidance: "Workspace root is '" + (state.rootName || 'project') + "'. Use '.' for this root directory.",
       capabilities: state.capabilities,
       allowWrite: config.allowWrite,
       allowCommand: config.allowCommand,
@@ -250,6 +251,14 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
     return isConnected() && config.allowCommand === true;
   }
 
+  function root() {
+    return state.root;
+  }
+
+  function rootName() {
+    return state.rootName;
+  }
+
   async function executeWorkspaceTool(name, args = {}) {
     if (!isConnected()) {
       return {
@@ -292,6 +301,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
           caseSensitive: args.case_sensitive ?? args.caseSensitive ?? false,
           include: Array.isArray(args.include) ? args.include : undefined,
           exclude: Array.isArray(args.exclude) ? args.exclude : undefined,
+          contextLines: Number(args.context_lines ?? args.contextLines) || undefined,
         };
         break;
 
@@ -444,6 +454,8 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
     handleWorkspaceConnected,
     handleWorkspaceDisconnected,
     isConnected,
+    root,
+    rootName,
     canWrite,
     canCommand,
     syncBridge,

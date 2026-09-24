@@ -133,14 +133,17 @@ pub fn search_code(
         };
 
         let reader = BufReader::new(file);
-        for (line_idx, line_res) in reader.lines().enumerate() {
-            let line = match line_res {
-                Ok(l) => l,
-                Err(_) => break, // invalid UTF-8 mid-file -> stop reading file
-            };
+        let mut lines = Vec::new();
+        for line_res in reader.lines() {
+            match line_res {
+                Ok(l) => lines.push(l),
+                Err(_) => break,
+            }
+        }
 
+        for (line_idx, line) in lines.iter().enumerate() {
             let is_match = if let Some(re) = &regex_matcher {
-                re.is_match(&line)
+                re.is_match(line)
             } else if !case_sensitive {
                 line.to_lowercase().contains(&query_lower)
             } else {
@@ -157,14 +160,39 @@ pub fn search_code(
                             line.chars().take(MAX_LINE_CHARS).collect::<String>()
                         )
                     } else {
-                        line
+                        line.clone()
+                    };
+
+                    let snippet = if let Some(c) = params.context_lines {
+                        if c > 0 {
+                            let start = line_idx.saturating_sub(c);
+                            let end = std::cmp::min(lines.len() - 1, line_idx + c);
+                            let snippet_lines: Vec<String> = lines[start..=end]
+                                .iter()
+                                .map(|l| {
+                                    if l.chars().count() > MAX_LINE_CHARS {
+                                        format!(
+                                            "{}...",
+                                            l.chars().take(MAX_LINE_CHARS).collect::<String>()
+                                        )
+                                    } else {
+                                        l.clone()
+                                    }
+                                })
+                                .collect();
+                            Some(snippet_lines.join("\n"))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
                     };
 
                     matches.push(SearchMatch {
                         path: rel_path.clone(),
                         line: line_idx + 1, // 1-based line number
                         content: bounded_line,
-                        snippet: None,
+                        snippet,
                     });
                 } else {
                     truncated = true;
@@ -229,6 +257,7 @@ mod tests {
             case_sensitive: Some(false),
             include: None,
             exclude: None,
+            context_lines: None,
         };
 
         let res = search_code(&sandbox, &params).unwrap();
@@ -257,6 +286,7 @@ mod tests {
             case_sensitive: Some(true),
             include: None,
             exclude: None,
+            context_lines: None,
         };
 
         let res = search_code(&sandbox, &params).unwrap();
@@ -280,6 +310,7 @@ mod tests {
             case_sensitive: Some(false),
             include: None,
             exclude: None,
+            context_lines: None,
         };
 
         let res = search_code(&sandbox, &params).unwrap();

@@ -169,6 +169,8 @@ fn apply_unified_diff(
 
     let patch_lines: Vec<&str> = patch_str.lines().collect();
     let mut i = 0;
+    let mut line_offset: isize = 0;
+    let mut min_match_idx: usize = 0;
 
     while i < patch_lines.len() {
         let line = patch_lines[i];
@@ -192,22 +194,44 @@ fn apply_unified_diff(
                 } else if let Some(stripped) = hline.strip_prefix('+') {
                     hunk_new.push(stripped);
                     total_added += 1;
+                } else if *hline == "" {
+                    // Empty context line in unified diff
+                    hunk_old.push("");
+                    hunk_new.push("");
+                } else if hline.starts_with('\\') {
+                    // Ignore "\ No newline at end of file"
                 }
                 i += 1;
             }
 
-            // Find where hunk_old matches in result_lines
-            // Search near orig_start first (1-based), then scan
-            let expected_idx = if orig_start > 0 { orig_start - 1 } else { 0 };
-            let match_idx = find_hunk_match(&result_lines, &hunk_old, expected_idx)?;
+            // Expected index adjusted for cumulative line offset from previous hunks
+            let expected_idx = if orig_start > 0 {
+                let shifted = (orig_start as isize - 1) + line_offset;
+                shifted.max(0) as usize
+            } else {
+                0
+            };
+
+            let match_idx =
+                find_hunk_match(&result_lines, &hunk_old, min_match_idx, expected_idx)?;
+
             // Replace hunk_old lines with hunk_new lines
-            let mut next_result = Vec::new();
+            let mut next_result = Vec::with_capacity(
+                result_lines
+                    .len()
+                    .saturating_add(hunk_new.len())
+                    .saturating_sub(hunk_old.len()),
+            );
             next_result.extend_from_slice(&result_lines[..match_idx]);
             for &nl in &hunk_new {
                 next_result.push(nl);
             }
             next_result.extend_from_slice(&result_lines[match_idx + hunk_old.len()..]);
             result_lines = next_result;
+
+            let hunk_delta = hunk_new.len() as isize - hunk_old.len() as isize;
+            line_offset += hunk_delta;
+            min_match_idx = match_idx + hunk_new.len();
         } else {
             i += 1;
         }
@@ -229,15 +253,22 @@ fn apply_unified_diff(
 }
 
 fn parse_hunk_header(header: &str) -> Result<(usize, usize), PatchError> {
-    // Expected: @@ -start,count +start,count @@
-    let parts: Vec<&str> = header.split_whitespace().collect();
-    if parts.len() < 3 || !parts[0].starts_with("@@") {
+    let trimmed = header.trim();
+    if !trimmed.starts_with("@@") {
         return Err(PatchError::MalformedPatch(format!(
             "Invalid hunk header: {header}"
         )));
     }
 
-    let old_range = parts[1].trim_start_matches('-');
+    let after_at = trimmed[2..].trim_start();
+    let parts: Vec<&str> = after_at.split_whitespace().collect();
+    if parts.is_empty() || !parts[0].starts_with('-') {
+        return Err(PatchError::MalformedPatch(format!(
+            "Invalid hunk header: {header}"
+        )));
+    }
+
+    let old_range = parts[0].trim_start_matches('-');
     let mut subparts = old_range.split(',');
     let start: usize = subparts
         .next()
@@ -251,35 +282,20 @@ fn parse_hunk_header(header: &str) -> Result<(usize, usize), PatchError> {
 fn find_hunk_match(
     lines: &[&str],
     hunk_old: &[&str],
+    min_idx: usize,
     hint_idx: usize,
 ) -> Result<usize, PatchError> {
     if hunk_old.is_empty() {
-        return Ok(hint_idx.min(lines.len()));
+        return Ok(hint_idx.max(min_idx).min(lines.len()));
     }
 
-    // Try exact hint index first
-    if hint_idx + hunk_old.len() <= lines.len()
-        && &lines[hint_idx..hint_idx + hunk_old.len()] == hunk_old
-    {
-        return Ok(hint_idx);
-    }
-
-    // Try within window of +/- 20 lines
-    let window = 20;
-    let min_search = hint_idx.saturating_sub(window);
-    let max_search = (hint_idx + window).min(lines.len().saturating_sub(hunk_old.len()));
-
-    for idx in min_search..=max_search {
-        if idx + hunk_old.len() <= lines.len() && &lines[idx..idx + hunk_old.len()] == hunk_old {
-            return Ok(idx);
-        }
-    }
-
-    // Global scan
     let mut matches = Vec::new();
-    for idx in 0..=lines.len().saturating_sub(hunk_old.len()) {
-        if &lines[idx..idx + hunk_old.len()] == hunk_old {
-            matches.push(idx);
+    let max_idx = lines.len().saturating_sub(hunk_old.len());
+    if min_idx <= max_idx {
+        for idx in min_idx..=max_idx {
+            if &lines[idx..idx + hunk_old.len()] == hunk_old {
+                matches.push(idx);
+            }
         }
     }
 
@@ -354,5 +370,38 @@ mod tests {
         let patch = "@@ -2,2 +2,2 @@\n-second\n+modified_second\n third\n";
         let res = apply_patch(content, None, None, Some(patch), "test.txt").unwrap();
         assert_eq!(res.new_content, "first\nmodified_second\nthird\nfourth\n");
+    }
+
+    #[test]
+    fn test_unified_diff_empty_context_lines() {
+        let content = "head\n\nmiddle\n\ntail\n";
+        let patch = "@@ -1,5 +1,5 @@\n head\n\n-middle\n+middle_edited\n\n tail\n";
+        let res = apply_patch(content, None, None, Some(patch), "test.txt").unwrap();
+        assert_eq!(res.new_content, "head\n\nmiddle_edited\n\ntail\n");
+    }
+
+    #[test]
+    fn test_unified_diff_multi_hunk_line_shifts() {
+        let content = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n";
+        // Hunk 1 inserts 2 lines at line 2. Hunk 2 modifies line 8.
+        let patch = "@@ -2,2 +2,4 @@\n-l2\n+l2_a\n+l2_b\n+l2_c\n l3\n@@ -8,2 +10,2 @@\n-l8\n+l8_modified\n l9\n";
+        let res = apply_patch(content, None, None, Some(patch), "test.txt").unwrap();
+        assert_eq!(
+            res.new_content,
+            "l1\nl2_a\nl2_b\nl2_c\nl3\nl4\nl5\nl6\nl7\nl8_modified\nl9\nl10\n"
+        );
+        assert_eq!(res.lines_added, 4);
+        assert_eq!(res.lines_removed, 2);
+    }
+
+    #[test]
+    fn test_unified_diff_rejects_ambiguous_hunk() {
+        let content = "item\nitem\n";
+        let patch = "@@ -1,1 +1,1 @@\n-item\n+replaced\n";
+        let err = apply_patch(content, None, None, Some(patch), "test.txt").unwrap_err();
+        match err {
+            PatchError::AmbiguousContext { occurrences, .. } => assert_eq!(occurrences, 2),
+            _ => panic!("Expected AmbiguousContext, got {err:?}"),
+        }
     }
 }

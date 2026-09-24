@@ -132,6 +132,8 @@ pub struct WorkspaceStatusResult {
     pub root: String,
     #[serde(rename = "rootName")]
     pub root_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guidance: Option<String>,
     pub read: bool,
     pub write: bool,
     pub command: bool,
@@ -155,6 +157,8 @@ pub struct SearchCodeParams {
     pub include: Option<Vec<String>>,
     #[serde(default)]
     pub exclude: Option<Vec<String>>,
+    #[serde(rename = "contextLines", alias = "context_lines", default)]
+    pub context_lines: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

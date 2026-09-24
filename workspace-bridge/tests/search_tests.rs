@@ -29,6 +29,7 @@ fn test_search_code_literal_multi_file() {
         case_sensitive: Some(true),
         include: None,
         exclude: None,
+        context_lines: None,
     };
 
     let res = search_code(&sandbox, &params).unwrap();
@@ -56,6 +57,7 @@ fn test_search_code_limit_truncation() {
         case_sensitive: Some(false),
         include: None,
         exclude: None,
+        context_lines: None,
     };
 
     let res = search_code(&sandbox, &params).unwrap();
@@ -87,6 +89,7 @@ fn test_search_code_gitignore_and_hidden() {
         case_sensitive: Some(false),
         include: None,
         exclude: None,
+        context_lines: None,
     };
 
     let res = search_code(&sandbox, &params).unwrap();
@@ -118,9 +121,42 @@ fn test_search_skips_binary_files() {
         case_sensitive: Some(false),
         include: None,
         exclude: None,
+        context_lines: None,
     };
 
     let res = search_code(&sandbox, &params).unwrap();
     assert_eq!(res.matches.len(), 1);
     assert_eq!(res.matches[0].path, "text.txt");
+    assert!(res.matches[0].snippet.is_none());
+}
+
+#[test]
+fn test_search_code_with_context_lines() {
+    let temp = tempdir().unwrap();
+    let sandbox = PathSandbox::new(temp.path()).unwrap();
+
+    let file_path = temp.path().join("code.rs");
+    fs::write(
+        &file_path,
+        "line 1 before\nline 2 before\ntarget_function()\nline 2 after\nline 3 after\n",
+    )
+    .unwrap();
+
+    let params = SearchCodeParams {
+        query: "target_function".to_string(),
+        limit: Some(10),
+        is_regex: Some(false),
+        case_sensitive: Some(false),
+        include: None,
+        exclude: None,
+        context_lines: Some(2),
+    };
+
+    let res = search_code(&sandbox, &params).unwrap();
+    assert_eq!(res.matches.len(), 1);
+    let snippet = res.matches[0].snippet.as_ref().unwrap();
+    assert!(snippet.contains("line 1 before"));
+    assert!(snippet.contains("line 2 before"));
+    assert!(snippet.contains("target_function()"));
+    assert!(snippet.contains("line 2 after"));
 }

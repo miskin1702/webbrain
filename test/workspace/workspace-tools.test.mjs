@@ -147,6 +147,7 @@ test('workspace search tool requires query and declares options', () => {
   assert.ok(search.function.parameters.properties.case_sensitive);
   assert.ok(search.function.parameters.properties.include);
   assert.ok(search.function.parameters.properties.exclude);
+  assert.ok(search.function.parameters.properties.context_lines);
 });
 
 test('workspace read tools require path and bounds', () => {
