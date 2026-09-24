@@ -15,6 +15,11 @@ import {
   SYSTEM_PROMPT_WORKSPACE_COMPACT,
   WORKSPACE_CODING_PROMPT_GUIDANCE,
 } from './workspace-tools.js';
+import {
+  CODING_TOOLS,
+  CODING_TOOL_NAMES,
+  SYSTEM_PROMPT_OMP_CODING_V2,
+} from './coding-tools.js';
 
 /**
  * Tool definitions for the WebBrain agent.
@@ -1780,16 +1785,20 @@ export function getToolsForMode(mode, opts = {}) {
     base = [...base, ...extras];
   }
   if (opts.workspaceConnected === true) {
-    if (normalizedMode === 'ask') {
-      base = [...base, ...WORKSPACE_READ_TOOLS];
+    if (opts.workspaceBackend === 'omp-sdk-v2') {
+      base = [...base, ...CODING_TOOLS];
     } else {
-      base = [...base, ...WORKSPACE_READ_TOOLS];
-      if (opts.workspaceCanWrite === true) {
-        base = [...base, WORKSPACE_APPLY_PATCH_TOOL, WORKSPACE_CREATE_FILE_TOOL];
-      }
-      base = [...base, WORKSPACE_GIT_DIFF_TOOL];
-      if (opts.workspaceCanCommand === true) {
-        base = [...base, WORKSPACE_RUN_COMMAND_TOOL];
+      if (normalizedMode === 'ask') {
+        base = [...base, ...WORKSPACE_READ_TOOLS];
+      } else {
+        base = [...base, ...WORKSPACE_READ_TOOLS];
+        if (opts.workspaceCanWrite === true) {
+          base = [...base, WORKSPACE_APPLY_PATCH_TOOL, WORKSPACE_CREATE_FILE_TOOL];
+        }
+        base = [...base, WORKSPACE_GIT_DIFF_TOOL];
+        if (opts.workspaceCanCommand === true) {
+          base = [...base, WORKSPACE_RUN_COMMAND_TOOL];
+        }
       }
     }
   }
