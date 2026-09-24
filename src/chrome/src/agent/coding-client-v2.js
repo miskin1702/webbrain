@@ -87,7 +87,7 @@ export function createCodingClientV2({ chromeApi = globalThis.chrome || {} } = {
         return;
       }
 
-      const timeoutMs = config.timeoutMs || 4000;
+      const timeoutMs = config.timeoutMs || 12000;
       const timeout = setTimeout(() => {
         if (!authenticated && epoch === connectionEpoch) {
           try { ws.close(); } catch {}

@@ -140,7 +140,7 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen } =
       }
 
       try {
-        await codingClientV2.connect({ url: config.url, token: config.token });
+        await codingClientV2.connect({ url: config.url, token: config.token, timeoutMs: opts.timeoutMs || 12000 });
         const openRes = await codingClientV2.openWorkspace(targetPath);
         state.connected = true;
         state.authenticated = true;
