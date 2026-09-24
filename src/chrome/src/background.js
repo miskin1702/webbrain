@@ -1,4 +1,5 @@
 import { installSafeSocialBackground } from './safesocial/background.js';
+import { createWorkspaceManager } from './workspace-runs.js';
 import { ProviderManager } from './providers/manager.js';
 import {
   WEBGPU_COMPASS_TINY_V2_MODEL_ID,
@@ -306,6 +307,13 @@ const cloudRunController = createCloudRunController({
 alwaysAllowApiMutationsReady
   .then(() => cloudRunController.syncBridge())
   .catch(() => {});
+
+const workspaceManager = createWorkspaceManager({
+  chromeApi: chrome,
+  ensureOffscreen,
+});
+agent.setWorkspaceClient(workspaceManager);
+workspaceManager.syncBridge().catch(() => {});
 
 const MAX_AGENT_STEPS_DEFAULT = 130;
 const MAX_AGENT_STEPS_UNLIMITED_SENTINEL = 200;
@@ -1177,6 +1185,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await loadClarifyTimeout();
   await syncAgentUserMemoryFromStorage().catch(() => {});
   await cloudRunController.syncBridge().catch(() => {});
+  await workspaceManager.syncBridge().catch(() => {});
   // Chrome registers the manifest handler with enabled=true after install.
   // Reconcile now and once more after registration settles so the native
   // default cannot overwrite the extension's opt-in default. The in-handler
@@ -1196,6 +1205,7 @@ chrome.runtime.onStartup?.addListener(async () => {
   await loadClarifyTimeout();
   await syncAgentUserMemoryFromStorage().catch(() => {});
   await cloudRunController.syncBridge().catch(() => {});
+  await workspaceManager.syncBridge().catch(() => {});
   scheduleUserMemoryExtractionDrain(5000);
 });
 
@@ -1214,6 +1224,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.providers || changes.activeProvider || changes.helpImproveWebBrain) providerManager.load().catch(() => {});
   if (changes.webbrainCloudBridgeEnabled || changes.webbrainCloudBridgeUrl) {
     cloudRunController.syncBridge().catch(() => {});
+  }
+  if (changes.webbrainWorkspaceConfig) {
+    workspaceManager.syncBridge().catch(() => {});
   }
   if (changes.maxAgentSteps) {
     agent.maxSteps = normalizeMaxAgentSteps(changes.maxAgentSteps.newValue);
@@ -2925,6 +2938,23 @@ async function handleMessage(msg, sender) {
       return await cloudRunController.stopBridge();
     case 'cloud_bridge_status':
       return await cloudRunController.bridgeStatus();
+    case 'workspace_connect':
+      return await workspaceManager.connectWorkspace(msg);
+    case 'workspace_disconnect':
+      return await workspaceManager.disconnectWorkspace();
+    case 'workspace_status':
+      return await workspaceManager.getWorkspaceStatus();
+    case 'workspace_execute_tool':
+      return await workspaceManager.executeWorkspaceTool(msg.name, msg.args);
+    case 'workspace_event':
+      workspaceManager.handleWorkspaceEvent(msg.event, msg.data);
+      return { ok: true };
+    case 'workspace_connected':
+      workspaceManager.handleWorkspaceConnected(msg.session);
+      return { ok: true };
+    case 'workspace_disconnected':
+      workspaceManager.handleWorkspaceDisconnected();
+      return { ok: true };
     case 'prepare_recording_host':
       return await prepareRecordingHost();
     case 'start_tab_recording': {

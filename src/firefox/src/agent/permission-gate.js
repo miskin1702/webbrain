@@ -31,6 +31,8 @@ export const Capability = {
   UPLOAD: 'upload',              // upload_file (attach a file to a page input)
   WINDOW: 'window',              // resize_window (changes browser window bounds)
   SCHEDULE: 'schedule',          // schedule_resume / schedule_task persistent future work
+  WORKSPACE_WRITE: 'workspace_write', // workspace_apply_patch
+  WORKSPACE_COMMAND: 'workspace_command', // workspace_run_command
 };
 
 // Human-readable verb for the permission prompt: "WebBrain wants to <label> <host>".
@@ -44,6 +46,8 @@ export const CAPABILITY_LABEL = {
   [Capability.UPLOAD]: 'upload a file on',
   [Capability.WINDOW]: 'resize the browser window for',
   [Capability.SCHEDULE]: 'schedule future work for',
+  [Capability.WORKSPACE_WRITE]: 'modify workspace files in',
+  [Capability.WORKSPACE_COMMAND]: 'run workspace commands in',
 };
 
 /**
@@ -123,6 +127,15 @@ export const UNTRUSTED_CONTENT_TOOLS = new Set([
   // are persisted as the final tool message and re-read on the next user turn.
   // The model-authored `summary` is wrapped too, which is harmless.
   'done',
+  // Workspace bridge: codebase files, diffs, search results, and command
+  // outputs carry user/attacker-controllable source text and must be wrapped.
+  'workspace_status',
+  'workspace_search_code',
+  'workspace_read_file',
+  'workspace_read_range',
+  'workspace_apply_patch',
+  'workspace_git_diff',
+  'workspace_run_command',
 ]);
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -404,6 +417,8 @@ const TOOL_CAPABILITY = {
   chrome_web_store_publish: Capability.NETWORK,
   schedule_resume: Capability.SCHEDULE,
   schedule_task: Capability.SCHEDULE,
+  workspace_apply_patch: Capability.WORKSPACE_WRITE,
+  workspace_run_command: Capability.WORKSPACE_COMMAND,
 };
 
 /**
@@ -562,6 +577,9 @@ export function hostForCapability(capability, args, currentUrlOrHost, toolName) 
   // identify the frame → '' so the caller fails closed.
   if (toolName === 'iframe_click' || toolName === 'iframe_type' || toolName === 'promote_iframe') {
     return normalizeHost(args.urlFilter);
+  }
+  if (capability === Capability.WORKSPACE_WRITE || capability === Capability.WORKSPACE_COMMAND) {
+    return 'workspace';
   }
   if (capability === Capability.NAVIGATE || capability === Capability.NETWORK || capability === Capability.DOWNLOAD) {
     if (typeof args.url === 'string' && args.url) {

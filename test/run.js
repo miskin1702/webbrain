@@ -55686,7 +55686,7 @@ test('sidepanel settles terminal scheduled clarification events and renders thei
     const handlerBody = panel.slice(handlerStart, handlerEnd);
     assert.match(
       settleBody,
-      /\['completed', 'clarification_required'\]\.includes\(event\)[\s\S]*?job\?\.lastResult[\s\S]*?formatMarkdown\(job\.lastResult\)/,
+      /\['completed', 'clarification_required'\]\.includes\(event\)[\s\S]*?job\?\.lastResult[\s\S]*?formatMarkdown\(job\.lastResult(?:,\s*\{[^}]*\})?\)/,
       `${label}: terminal clarification result should render before settlement`,
     );
     assert.match(

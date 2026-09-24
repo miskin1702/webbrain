@@ -69,3 +69,7 @@ build/
 
 # Mobile app (local dev)
 mobile/
+
+# Local workspace daemon build target
+workspace-bridge/target/
+test/fixtures/**/.git

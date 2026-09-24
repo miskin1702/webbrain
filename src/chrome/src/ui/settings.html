@@ -1706,6 +1706,44 @@
               <span id="cloud-bridge-status-text" data-i18n="st.display.cloud_bridge.status_disabled"></span>
             </div>
           </div>
+          <div class="setting-row cloud-bridge-setting" id="workspace-bridge-setting">
+            <div class="cloud-bridge-header">
+              <div class="setting-info">
+                <div class="setting-label" id="workspace-bridge-label">Local Workspace Bridge</div>
+                <div class="setting-desc" id="workspace-bridge-desc">
+                  <span>Connect a local project codebase through the local workspace bridge daemon to let the agent search, read, patch, and test files.</span>
+                </div>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-workspace-bridge" aria-labelledby="workspace-bridge-label" aria-describedby="workspace-bridge-desc workspace-bridge-status">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <label class="cloud-bridge-url-field" for="input-workspace-bridge-url">
+              <span class="cloud-bridge-url-label">Bridge URL</span>
+              <input class="setting-input" type="text" id="input-workspace-bridge-url" inputmode="url" autocomplete="off" spellcheck="false"
+                     placeholder="ws://127.0.0.1:18374">
+            </label>
+            <label class="cloud-bridge-url-field" for="input-workspace-bridge-token">
+              <span class="cloud-bridge-url-label">Pairing Token</span>
+              <input class="setting-input" type="password" id="input-workspace-bridge-token" autocomplete="off" spellcheck="false"
+                     placeholder="Optional pairing secret">
+            </label>
+            <div style="display:flex;gap:18px;margin-top:4px;">
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+                <input type="checkbox" id="toggle-workspace-write" checked>
+                <span>Allow file edits</span>
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+                <input type="checkbox" id="toggle-workspace-command">
+                <span>Allow terminal commands</span>
+              </label>
+            </div>
+            <div class="cloud-bridge-status" id="workspace-bridge-status" data-state="disabled" role="status" aria-live="polite">
+              <span class="cloud-bridge-status-dot" aria-hidden="true"></span>
+              <span id="workspace-bridge-status-text">Disabled</span>
+            </div>
+          </div>
           <div class="setting-row">
             <div class="setting-info">
               <div class="setting-label" data-i18n="st.display.screenshot.label"></div>

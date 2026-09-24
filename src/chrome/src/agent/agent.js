@@ -2,7 +2,7 @@ import { JEV_FAST_KEYS, JEV_CLASSIFIER_THRESHOLD, JEV_BROWSER_THRESHOLD, confide
 import { redactSystemOneText, wrapSystemOneData } from './systemone-evidence.js';
 import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailureReason, SYSTEM_ONE_COST_PROVIDER } from './systemone-judge.js';
 import { SOCIAL_PLATFORMS, socialPublicationApiPlatform, normalizePublicationContract, publicationProgress, exactPublicationText, publicationMediaMatches, publicationContractMessages, publicationAuditMessages, publicationAuditAccepted } from './social-publish-contract.js';
-import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_DEV_APPENDIX, SYSTEM_PROMPT_WEBMCP_ASK, SYSTEM_PROMPT_WEBMCP_ACT } from './tools.js';
+import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_DEV_APPENDIX, SYSTEM_PROMPT_WEBMCP_ASK, SYSTEM_PROMPT_WEBMCP_ACT, SYSTEM_PROMPT_WORKSPACE } from './tools.js';
 import { validateToolArguments } from './tool-arguments.js';
 import { isSessionQuotaError, serializeConversationForSession, SESSION_CONVERSATION_BUDGET_BYTES, SESSION_CONVERSATION_RETRY_BUDGET_BYTES } from './conversation-persistence.js';
 import { formatErrorMessage } from '../error-format.js';
@@ -872,6 +872,7 @@ export class Agent extends LoopDetector {
     super();
     this.providerManager = providerManager;
     this.conversations = new Map(); // tabId -> messages[]
+    this._workspaceClient = null;
     // tabId -> durable selected-text boundary. Follow-up turns and Continue
     // inherit this scope without exposing conversation history from before the
     // selection. Cleared with the conversation or replaced by a new selection.
@@ -5973,6 +5974,10 @@ export class Agent extends LoopDetector {
     if (!service?.search) throw new TypeError('Standalone offline retrieval service must provide search().');
     this._standaloneOfflineRagService?.close?.();
     this._standaloneOfflineRagService = service;
+  }
+
+  setWorkspaceClient(client) {
+    this._workspaceClient = client;
   }
 
   setConversationScopeChangeListener(listener) {
@@ -24966,6 +24971,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       const webMcpPrompt = this._isActionMode(mode) ? SYSTEM_PROMPT_WEBMCP_ACT : SYSTEM_PROMPT_WEBMCP_ASK;
       prompt += `\n\n${webMcpPrompt}`;
     }
+    if (this._workspaceClient?.isConnected?.()) {
+      prompt += `\n\n${SYSTEM_PROMPT_WORKSPACE}`;
+    }
 
     // Universal cookie/paywall guidance. Always relevant for http(s)
     // browsing; cheap enough to carry on chrome:///file:// pages too
@@ -33502,12 +33510,32 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     }
   }
 
+  async _executeWorkspaceTool(name, args, { tabId = null, onUpdate = null, signal = null } = {}) {
+    if (this._workspaceClient && typeof this._workspaceClient.executeTool === 'function') {
+      return await this._workspaceClient.executeTool(name, args, { tabId, signal });
+    }
+    try {
+      const response = await chrome.runtime.sendMessage({
+        target: 'background',
+        action: 'workspace_execute_tool',
+        name,
+        args,
+      });
+      return response || { success: false, error: 'No response from workspace bridge' };
+    } catch (e) {
+      return { success: false, error: `Workspace bridge error: ${e.message || String(e)}` };
+    }
+  }
+
   async _executeToolImpl(tabId, name, args, onUpdate = null, executionContext = null) {
     const dispatchContext = executionContext && typeof executionContext === 'object'
       ? executionContext
       : {};
     const earlyCdpAbortSignal = dispatchContext._contentActionAbortSignal || null;
     const earlyCdpDispatchState = dispatchContext._contentActionDispatchState || { started: false };
+    if (name.startsWith('workspace_')) {
+      return await this._executeWorkspaceTool(name, args, { tabId, onUpdate, signal: earlyCdpAbortSignal });
+    }
     const throwIfEarlyCdpAborted = () => this._throwIfAborted(earlyCdpAbortSignal);
     const markEarlyCdpDispatched = () => { earlyCdpDispatchState.started = true; };
     const cancelEarlyCdpPressedPointer = async () => {
@@ -42016,6 +42044,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       carouselNavigation: !!getCarouselNavigationPolicy(await this._currentUrl(tabId)),
       gmailResultCounting: !!getGmailResultCountPolicy(await this._currentUrl(tabId)),
       researchEscalationEnabled: this.researchEscalationEnabled,
+      workspaceConnected: this._workspaceClient?.isConnected?.() === true,
+      workspaceCanWrite: this._workspaceClient?.canWrite?.() === true,
+      workspaceCanCommand: this._workspaceClient?.canCommand?.() === true,
     });
     // The selected text is already present in the trusted run envelope.
     // Advertising page/network tools would let an injected selection induce a
@@ -42260,6 +42291,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         carouselNavigation: !!getCarouselNavigationPolicy(await this._currentUrl(tabId)),
         gmailResultCounting: !!getGmailResultCountPolicy(await this._currentUrl(tabId)),
         researchEscalationEnabled: this.researchEscalationEnabled,
+        workspaceConnected: this._workspaceClient?.isConnected?.() === true,
+        workspaceCanWrite: this._workspaceClient?.canWrite?.() === true,
+        workspaceCanCommand: this._workspaceClient?.canCommand?.() === true,
       });
       if (selectionOnly || standaloneChatRun) tools = [];
       if (forceCompletionVerificationTurn) {
@@ -43331,6 +43365,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       carouselNavigation: !!getCarouselNavigationPolicy(await this._currentUrl(tabId)),
       gmailResultCounting: !!getGmailResultCountPolicy(await this._currentUrl(tabId)),
       researchEscalationEnabled: this.researchEscalationEnabled,
+      workspaceConnected: this._workspaceClient?.isConnected?.() === true,
+      workspaceCanWrite: this._workspaceClient?.canWrite?.() === true,
+      workspaceCanCommand: this._workspaceClient?.canCommand?.() === true,
     });
     // Match the non-streaming path: selection-grounded turns are tool-free so
     // page or network content cannot be introduced after the source anchor.
@@ -43411,6 +43448,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         carouselNavigation: !!getCarouselNavigationPolicy(await this._currentUrl(tabId)),
         gmailResultCounting: !!getGmailResultCountPolicy(await this._currentUrl(tabId)),
         researchEscalationEnabled: this.researchEscalationEnabled,
+        workspaceConnected: this._workspaceClient?.isConnected?.() === true,
+        workspaceCanWrite: this._workspaceClient?.canWrite?.() === true,
+        workspaceCanCommand: this._workspaceClient?.canCommand?.() === true,
       });
       if (selectionOnly || standaloneChatRun) tools = [];
       if (forceCompletionVerificationTurn) {

@@ -622,6 +622,29 @@ const languagePickerBtn = document.getElementById('language-picker-btn');
 const languagePickerMenu = document.getElementById('language-picker-menu');
 const MORE_PROVIDERS_OPTION_VALUE = '__more_providers__';
 const statusDot = document.getElementById('status-dot');
+const workspaceBadge = document.getElementById('workspace-badge');
+const workspaceBadgeName = document.getElementById('workspace-badge-name');
+
+async function updateWorkspaceBadge() {
+  if (!workspaceBadge || !workspaceBadgeName) return;
+  try {
+    const status = await sendToBackground('workspace_status');
+    if (status?.connected && status?.authenticated) {
+      const name = status.rootName || status.root?.split(/[/\\]/).pop() || 'workspace';
+      workspaceBadgeName.textContent = name;
+      workspaceBadge.title = `Workspace connected: ${status.root || name}`;
+      workspaceBadge.classList.remove('hidden');
+    } else {
+      workspaceBadge.classList.add('hidden');
+    }
+  } catch {
+    workspaceBadge.classList.add('hidden');
+  }
+}
+
+workspaceBadge?.addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
+});
 // Short labels for the closed picker button (menu rows keep the longer status text).
 const providerPickerLabelById = new Map();
 let languagePickerTypeahead = '';
@@ -4649,6 +4672,7 @@ async function init() {
   currentTabId = initialTabId;
   renderedTabId = currentTabId;
 
+  void updateWorkspaceBadge();
   // Tab-activation and window-focus events are extension-wide — every
   // browser window fires them, and each window has its own side panel
   // instance. Without scoping, activity in window B would silently
@@ -9555,6 +9579,13 @@ chrome.runtime.onMessage.addListener((msg) => {
     } else {
       showRecordingStatus(t('sp.record.transcribe_failed', { error: msg.result?.error || 'unknown' }), { autoHide: 8000 });
     }
+  }
+});
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.target !== 'sidepanel') return;
+  if (['workspace_event', 'workspace_connected', 'workspace_disconnected'].includes(msg.action)) {
+    void updateWorkspaceBadge();
   }
 });
 

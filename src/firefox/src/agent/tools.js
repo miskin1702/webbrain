@@ -2,6 +2,15 @@ import { closeToolDefinitions } from './tool-arguments.js';
 import { hasJsonSchemaMarker, isJsonSchemaSpec } from './cloud-output.js';
 import { EXPANDED_TREE_PAGE_CHARS, STANDARD_TREE_PAGE_CHARS } from './read-completeness.js';
 import { OTP_EMAIL_TOOL, OTP_EMAIL_TOOL_NAME } from './otp-email-tool.js';
+import {
+  WORKSPACE_READ_TOOLS,
+  WORKSPACE_APPLY_PATCH_TOOL,
+  WORKSPACE_GIT_DIFF_TOOL,
+  WORKSPACE_RUN_COMMAND_TOOL,
+  WORKSPACE_TOOL_NAMES,
+  SYSTEM_PROMPT_WORKSPACE,
+  SYSTEM_PROMPT_WORKSPACE_COMPACT,
+} from './workspace-tools.js';
 
 /**
  * Tool definitions for the WebBrain agent.
@@ -1126,7 +1135,7 @@ export const RETIRED_AGENT_TOOL_NAMES = new Set([
   'screenshot', 'full_page_screenshot', 'record_tab', 'stop_recording',
   'new_tab', 'list_tabs', 'activate_tab',
 ]);
-export const RESERVED_AGENT_TOOL_NAMES = new Set([...AGENT_TOOL_NAMES, ...RETIRED_AGENT_TOOL_NAMES, OTP_EMAIL_TOOL_NAME, 'done_json', 'load_skill', 'beep']);
+export const RESERVED_AGENT_TOOL_NAMES = new Set([...AGENT_TOOL_NAMES, ...RETIRED_AGENT_TOOL_NAMES, OTP_EMAIL_TOOL_NAME, ...WORKSPACE_TOOL_NAMES, 'done_json', 'load_skill', 'beep']);
 export const DEV_ONLY_TOOL_NAMES = new Set(['read_page_source', 'inspect_element_styles', 'execute_js']);
 export const DEV_EXTENDED_TOOL_NAMES = new Set([
   ...DEV_ONLY_TOOL_NAMES,
@@ -1611,6 +1620,20 @@ export function getToolsForMode(mode, opts = {}) {
       return true;
     });
     base = [...base, ...extras];
+  }
+  if (opts.workspaceConnected === true) {
+    if (normalizedMode === 'ask') {
+      base = [...base, ...WORKSPACE_READ_TOOLS];
+    } else {
+      base = [...base, ...WORKSPACE_READ_TOOLS];
+      if (opts.workspaceCanWrite === true) {
+        base = [...base, WORKSPACE_APPLY_PATCH_TOOL];
+      }
+      base = [...base, WORKSPACE_GIT_DIFF_TOOL];
+      if (opts.workspaceCanCommand === true) {
+        base = [...base, WORKSPACE_RUN_COMMAND_TOOL];
+      }
+    }
   }
   const useDoneJson = ['ask', 'act'].includes(normalizedMode)
     && tier === 'full'
@@ -2100,3 +2123,8 @@ SCRATCHPAD & DON'T REDO WORK:
 
 LISTINGS:
 - On listing/search-result pages, EXTRACT first, paginate second: list each visible item to the user (title + price/date + link), then move to the next page. For "give me the links/items" tasks, call done with what you have as soon as it's useful — partial-but-delivered beats complete-but-never-delivered.`;
+
+export {
+  SYSTEM_PROMPT_WORKSPACE,
+  SYSTEM_PROMPT_WORKSPACE_COMPACT,
+};

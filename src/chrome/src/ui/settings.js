@@ -143,6 +143,13 @@ const cloudBridgeToggle = document.getElementById('toggle-cloud-bridge');
 const cloudBridgeUrlInput = document.getElementById('input-cloud-bridge-url');
 const cloudBridgeStatus = document.getElementById('cloud-bridge-status');
 const cloudBridgeStatusText = document.getElementById('cloud-bridge-status-text');
+const workspaceBridgeToggle = document.getElementById('toggle-workspace-bridge');
+const workspaceBridgeUrlInput = document.getElementById('input-workspace-bridge-url');
+const workspaceBridgeTokenInput = document.getElementById('input-workspace-bridge-token');
+const workspaceWriteToggle = document.getElementById('toggle-workspace-write');
+const workspaceCommandToggle = document.getElementById('toggle-workspace-command');
+const workspaceBridgeStatus = document.getElementById('workspace-bridge-status');
+const workspaceBridgeStatusText = document.getElementById('workspace-bridge-status-text');
 const scheduledTasksToggle = document.getElementById('toggle-scheduled-tasks');
 const scheduledConfirmToggle = document.getElementById('toggle-scheduled-confirm');
 const visionBaseUrlInput = document.getElementById('vision-base-url');
@@ -713,6 +720,98 @@ async function initCloudBridgeSettings(stored) {
   startCloudBridgeStatusPolling();
 }
 
+function setWorkspaceBridgeStatus(state, message) {
+  if (!workspaceBridgeStatus || !workspaceBridgeStatusText) return;
+  workspaceBridgeStatus.dataset.state = state;
+  workspaceBridgeStatusText.textContent = message;
+}
+
+function renderWorkspaceBridgeStatus(status = {}) {
+  if (!workspaceBridgeToggle) return;
+  if (!workspaceBridgeToggle.checked || !status.enabled) {
+    setWorkspaceBridgeStatus('disabled', 'Disabled');
+    return;
+  }
+  if (status.connected && status.authenticated) {
+    const rootLabel = status.rootName || status.root || 'authorized root';
+    setWorkspaceBridgeStatus('connected', `Connected: ${rootLabel}`);
+  } else if (status.connected && !status.authenticated) {
+    setWorkspaceBridgeStatus('waiting', status.lastError || 'Authenticating...');
+  } else if (status.lastError) {
+    setWorkspaceBridgeStatus('error', `Error: ${status.lastError}`);
+  } else {
+    setWorkspaceBridgeStatus('waiting', 'Connecting to 127.0.0.1:18374...');
+  }
+}
+
+async function refreshWorkspaceBridgeStatus() {
+  try {
+    const status = await sendToBackground('workspace_status');
+    renderWorkspaceBridgeStatus(status);
+  } catch (error) {
+    setWorkspaceBridgeStatus('error', error.message || 'Status check failed');
+  }
+}
+
+async function saveWorkspaceBridgeConfig() {
+  if (!workspaceBridgeToggle) return;
+  const enabled = workspaceBridgeToggle.checked;
+  const url = workspaceBridgeUrlInput?.value?.trim() || 'ws://127.0.0.1:18374';
+  const token = workspaceBridgeTokenInput?.value?.trim() || '';
+  const allowWrite = workspaceWriteToggle?.checked !== false;
+  const allowCommand = workspaceCommandToggle?.checked === true;
+
+  try {
+    if (enabled) {
+      setWorkspaceBridgeStatus('waiting', 'Connecting...');
+      const status = await sendToBackground('workspace_connect', {
+        url,
+        token,
+        allowWrite,
+        allowCommand,
+      });
+      renderWorkspaceBridgeStatus(status);
+    } else {
+      const status = await sendToBackground('workspace_disconnect');
+      renderWorkspaceBridgeStatus(status);
+    }
+  } catch (err) {
+    setWorkspaceBridgeStatus('error', err.message || 'Connection failed');
+  }
+}
+
+async function initWorkspaceBridgeSettings(stored) {
+  if (!workspaceBridgeToggle || !workspaceBridgeUrlInput) return;
+  const cfg = stored.webbrainWorkspaceConfig || {};
+  workspaceBridgeToggle.checked = cfg.enabled === true;
+  workspaceBridgeUrlInput.value = cfg.url || 'ws://127.0.0.1:18374';
+  if (workspaceBridgeTokenInput) workspaceBridgeTokenInput.value = cfg.token || '';
+  if (workspaceWriteToggle) workspaceWriteToggle.checked = cfg.allowWrite !== false;
+  if (workspaceCommandToggle) workspaceCommandToggle.checked = cfg.allowCommand === true;
+
+  if (workspaceBridgeToggle.checked) {
+    await refreshWorkspaceBridgeStatus();
+  } else {
+    renderWorkspaceBridgeStatus({ enabled: false });
+  }
+
+  workspaceBridgeToggle.addEventListener('change', () => {
+    saveWorkspaceBridgeConfig();
+  });
+  workspaceWriteToggle?.addEventListener('change', () => {
+    saveWorkspaceBridgeConfig();
+  });
+  workspaceCommandToggle?.addEventListener('change', () => {
+    saveWorkspaceBridgeConfig();
+  });
+  workspaceBridgeUrlInput.addEventListener('change', () => {
+    if (workspaceBridgeToggle.checked) saveWorkspaceBridgeConfig();
+  });
+  workspaceBridgeTokenInput?.addEventListener('change', () => {
+    if (workspaceBridgeToggle.checked) saveWorkspaceBridgeConfig();
+  });
+}
+
 function formatUsd(value) {
   return '$' + normalizeCostAmount(value, 0).toFixed(2);
 }
@@ -899,6 +998,7 @@ async function init() {
     allowLocalNetworkToggle.checked = stored.agentAllowLocalNetwork === true; // off by default
   }
   await initCloudBridgeSettings(stored);
+  await initWorkspaceBridgeSettings(stored);
   if (scheduledTasksToggle) {
     scheduledTasksToggle.checked = stored.scheduledTasksEnabled !== false; // on by default
   }
