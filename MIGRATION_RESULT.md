@@ -63,13 +63,14 @@ Measured from actual test runs on Windows 11 workstation:
 ---
 
 ### C. Browser Extension UI & Rigorous Harness E2E
-- `test/workspace/browser-extension-e2e-harness.mjs`: Rigorous integration harness validating unpacked build bundle integrity, settings persistence, live WebSocket gateway handoff (`/webbrain/coding`), task steering (`coding.steer`), task abort (`coding.abort`), dual-backend rollback, and Playwright unpacked extension launch smoke testing.
+- `test/workspace/browser-extension-e2e-harness.mjs`: Integration harness validating unpacked build bundle integrity (`build/chrome/`), settings backend toggle & V1 rollback via workspace manager mocks, live WebSocket gateway connection & workspace open contract (`/webbrain/coding`), and Playwright unpacked extension launch smoke testing.
+- **Scope Clarification**: This harness does not execute full automated browser extension sidepanel DOM UI interaction flows (which remain blocked on headless extension automation runner support).
+
 ## 5. Exit Gate, Browser UI E2E & Rust Decommission Status
 
-- **Browser UI E2E Status**: **BLOCKED / GATED**
-  - Automated testing covers in-process `AgentSession` tool loop, live WebSocket protocol contracts, dual-backend manager rollback, and security corpus.
-  - Automated extension-hosted browser UI E2E (driving real Chrome extension sidepanel DOM during coding task) remains blocked on the absence of a headless browser UI extension runner; manual user verification in unpacked Chrome build (`build\chrome/`) is the verified path.
-
+- **Browser UI E2E Status**: **PARTIALLY AUTOMATED / GATED**
+  - Automated testing covers in-process `AgentSession` tool loop, live WebSocket protocol contracts, dual-backend manager rollback, unpacked build bundle integrity, and settings persistence.
+  - Full automated extension-hosted browser UI E2E (driving real Chrome extension sidepanel DOM and multi-turn coding handoff UI loops) remains gated on headless browser UI extension runner support; manual user verification in unpacked Chrome build (`build\chrome/`) and integration test harness execution are the verified paths.
 - **Rust Decommission Decision**: **BLOCKED / GATED**
   - In accordance with Sections 25 and 26 of `WEBBRAIN_OMP_SDK_MIGRATION_PLAN.md`, Rust V1 must be retained as the operational fallback baseline (`workspaceBackend: 'rust-v1'`).
   - While V2 protocol, in-process session tool loop, settings UI, and rollback have passed all automated tests, the required **production soak testing** across multi-hour user coding sessions has not yet concluded.

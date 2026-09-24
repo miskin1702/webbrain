@@ -1,11 +1,15 @@
 /**
  * Browser Extension UI Integration & E2E Rigorous Harness
  * 
- * Validates:
- * 1. Extension build bundle integrity (build/chrome unpacked files)
- * 2. Settings configuration and backend state persistence (omp-sdk-v2 vs rust-v1)
- * 3. Live browser-to-gateway WebSocket handoff, connection, workspace open, and session disposal.
- * 4. Playwright unpacked extension launch smoke test (with clean environment constraint handling).
+ * SCOPE & LIMITATION CLARIFICATION:
+ * This harness validates:
+ * 1. Extension build bundle integrity (unpacked files in build/chrome).
+ * 2. Settings configuration and backend state persistence (omp-sdk-v2 vs rust-v1 rollback).
+ * 3. Live WebSocket gateway connection and workspace open contract (/webbrain/coding).
+ * 4. Playwright unpacked extension launch smoke test (when browser executable is available).
+ * 
+ * NOTE: This harness does NOT execute a full end-to-end browser DOM sidepanel UI interaction
+ * (clicking/typing inside the extension popup UI), which remains gated on automated extension UI runners.
  */
 
 import test from 'node:test';
@@ -86,7 +90,7 @@ test('Workspace manager handles settings backend toggle, path, token and V1 roll
   await manager.disconnectWorkspace();
   await manager.connectWorkspace({
     workspaceBackend: 'omp-sdk-v2',
-    url: 'ws://127.0.0.1:18389/webbrain/coding',
+    url: 'ws://127.0.0.1:18395/webbrain/coding',
     workspacePath: 'C:\\Projects\\webapp',
     token: 'token-123',
     timeoutMs: 1000,
@@ -94,8 +98,8 @@ test('Workspace manager handles settings backend toggle, path, token and V1 roll
   assert.strictEqual(manager.workspaceBackend(), 'omp-sdk-v2');
 });
 
-test('Live Browser-to-Gateway WebSocket Handshake and Workspace Open', async () => {
-  const PORT = 18389;
+test('Live Browser-to-Gateway WebSocket Handshake and Workspace Open with Guaranteed Cleanup', async () => {
+  const PORT = 18395 + Math.floor(Math.random() * 50); // dynamic non-colliding port
   const TOKEN = 'e2e-browser-token-456';
 
   const serverProc = spawn(
@@ -118,28 +122,38 @@ test('Live Browser-to-Gateway WebSocket Handshake and Workspace Open', async () 
     }
   );
 
-  await new Promise((resolve, reject) => {
+  let serverStarted = false;
+  const startupPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      if (!serverStarted) reject(new Error('Gateway server startup timed out'));
+    }, 10000);
+
     serverProc.stdout.on('data', (d) => {
       if (d.toString().includes('Portable OMP Gateway listening:')) {
+        serverStarted = true;
+        clearTimeout(timeout);
         resolve();
       }
     });
-    serverProc.on('error', reject);
+    serverProc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
     serverProc.on('exit', (code) => {
-      if (code !== null && code !== 0) reject(new Error(`Server exited with code ${code}`));
+      if (!serverStarted && code !== null && code !== 0) {
+        clearTimeout(timeout);
+        reject(new Error(`Server exited prematurely with code ${code}`));
+      }
     });
   });
 
   try {
-    const client = createCodingClientV2();
-    const eventsReceived = [];
-    client.addEventListener((ev) => eventsReceived.push(ev));
+    await startupPromise;
 
-    // Connect
+    const client = createCodingClientV2();
     const conn = await client.connect({ url: `ws://127.0.0.1:${PORT}/webbrain/coding`, token: TOKEN });
     assert.strictEqual(conn.ok, true);
 
-    // Open Workspace
     const openRes = await client.openWorkspace(path.join(ROOT, 'test/fixtures/workspace-sample-project'));
     assert.ok(openRes.workspaceId);
     assert.strictEqual(client.isConnected(), true);
@@ -147,30 +161,49 @@ test('Live Browser-to-Gateway WebSocket Handshake and Workspace Open', async () 
     await client.disconnect();
     assert.strictEqual(client.isConnected(), false);
   } finally {
-    serverProc.kill();
+    // Guaranteed child process cleanup
+    if (serverProc && !serverProc.killed) {
+      serverProc.kill('SIGTERM');
+      await new Promise((resolve) => {
+        serverProc.on('exit', resolve);
+        setTimeout(resolve, 2000); // hard stop timeout fallback
+      });
+    }
   }
 });
 
-test('Playwright extension launch smoke test (unpacked bundle load)', async () => {
+test('Playwright unpacked extension launch smoke test (with browser executable check)', async () => {
   if (!fs.existsSync(BUILD_CHROME_DIR)) {
     console.warn('Skipping Playwright unpacked extension launch: build/chrome not found');
     return;
   }
 
+  let executablePath;
   try {
-    const userDataDir = fs.mkdtempSync(path.join(path.dirname(BUILD_CHROME_DIR), 'pw-user-data-'));
-    const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: false,
-      args: [
-        `--disable-extensions-except=${BUILD_CHROME_DIR}`,
-        `--load-extension=${BUILD_CHROME_DIR}`,
-      ],
-    });
-    
+    executablePath = chromium.executablePath();
+  } catch {
+    executablePath = null;
+  }
+
+  if (!executablePath || !fs.existsSync(executablePath)) {
+    console.warn('Playwright browser executable not installed locally; skipping launch smoke test (run npx playwright install if needed).');
+    return;
+  }
+
+  const userDataDir = fs.mkdtempSync(path.join(path.dirname(BUILD_CHROME_DIR), 'pw-user-data-'));
+  const context = await chromium.launchPersistentContext(userDataDir, {
+    headless: false,
+    args: [
+      `--disable-extensions-except=${BUILD_CHROME_DIR}`,
+      `--load-extension=${BUILD_CHROME_DIR}`,
+    ],
+  });
+  
+  try {
     const pages = context.pages();
     assert.ok(Array.isArray(pages));
+  } finally {
     await context.close();
-  } catch (err) {
-    console.warn('Playwright unpacked extension launch note (environmental sandbox constraint):', err.message);
+    fs.rmSync(userDataDir, { recursive: true, force: true });
   }
 });
