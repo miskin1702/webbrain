@@ -2079,12 +2079,13 @@ Bu dosyayi alan ajan icin baslangic talimati:
 
 ---
 
-# 38. REVISION UPDATE: BROWSER EXTENSION UI E2E & RIGOROUS HARNESS
+# 38. REVISION UPDATE: BROWSER EXTENSION UI E2E & INTEGRATION HARNESS SCOPE
 
-As part of the final execution closure, a rigorous browser extension E2E integration harness (`test/workspace/browser-extension-e2e-harness.mjs`) has been established. This harness validates:
-1. Unpacked extension build output (`build/chrome/manifest.json`, background, sidepanel, settings, client).
-2. Settings backend persistence and toggle between `omp-sdk-v2` and `rust-v1` rollback.
-3. Live browser-to-gateway WebSocket handoff (`/webbrain/coding`), handshake, workspace opening, `coding.start`, progress normalization, task steering (`coding.steer`), task abort (`coding.abort`), and session disposal.
-4. Playwright unpacked extension loading smoke test with graceful environment constraint handling.
-5. Preservation of the working Rust V1 fallback path behind feature flags without premature removal.
+As part of the final execution closure, the integration harness (`test/workspace/browser-extension-e2e-harness.mjs`) is restricted to the following exact coverage:
+1. Unpacked extension build output structure (`build/chrome/`).
+2. Settings backend persistence and toggle between `omp-sdk-v2` and `rust-v1` rollback via workspace manager mocks.
+3. Live WebSocket gateway connection and workspace open contract (`/webbrain/coding`).
+4. Playwright unpacked extension loading smoke test (when browser executable is available).
+
+**Explicit Non-Coverage**: This harness does **not** validate autonomous coding task execution (`coding.start`), progress normalization, task steering (`coding.steer`), task abort (`coding.abort`), or full multi-turn browser UI verification loops. Browser UI E2E automation remains **PARTIALLY AUTOMATED / GATED** pending headless browser extension UI runner support.
 
