@@ -166,6 +166,53 @@ async function run() {
   assert.ok(searchResp.result.matches.some(m => m.path.includes('selam.md')), 'Match should be in selam.md');
   console.log('✓ workspace.search_code found match in selam.md.');
 
+  // 7. workspace.list_dir
+  console.log('Listing directory via workspace.list_dir on "."...');
+  const listResp = await client.request('workspace.list_dir', { path: '.' });
+  console.log('list_dir response:', JSON.stringify(listResp));
+  assert.equal(listResp.ok, true, `list_dir failed: ${JSON.stringify(listResp.error)}`);
+  assert.ok(Array.isArray(listResp.result.entries), 'Expected entries array');
+  const entryNames = listResp.result.entries.map(e => e.name);
+  for (const expectedFile of ['selam.md', 'selam_patch.md', 'test.md', 'webbrain-workspace.exe']) {
+    assert.ok(
+      entryNames.includes(expectedFile),
+      `Expected ${expectedFile} in list_dir entries, got: ${entryNames.join(', ')}`
+    );
+  }
+  console.log('✓ workspace.list_dir returned selam.md, selam_patch.md, test.md, webbrain-workspace.exe.');
+
+  // 8. workspace.glob
+  console.log('Finding files via workspace.glob with pattern "*.md"...');
+  const globResp = await client.request('workspace.glob', { pattern: '*.md' });
+  console.log('glob response:', JSON.stringify(globResp));
+  assert.equal(globResp.ok, true, `glob failed: ${JSON.stringify(globResp.error)}`);
+  assert.ok(Array.isArray(globResp.result.matches), 'Expected matches array');
+  for (const expectedMd of ['selam.md', 'selam_patch.md', 'test.md']) {
+    assert.ok(
+      globResp.result.matches.some(m => m.endsWith(expectedMd) || m === expectedMd),
+      `Expected ${expectedMd} in glob matches, got: ${globResp.result.matches.join(', ')}`
+    );
+  }
+  console.log('✓ workspace.glob returned matching .md files.');
+
+  // 9. workspace.run_command with "dir"
+  console.log('Executing command "dir" via workspace.run_command...');
+  const cmdDirResp = await client.request('workspace.run_command', { command: 'dir' });
+  console.log('run_command "dir" response:', JSON.stringify(cmdDirResp));
+  assert.equal(cmdDirResp.ok, true, `run_command "dir" failed: ${JSON.stringify(cmdDirResp.error)}`);
+  assert.equal(cmdDirResp.result.exitCode, 0, `Expected exitCode 0, got ${cmdDirResp.result.exitCode}`);
+  assert.ok(cmdDirResp.result.stdout && cmdDirResp.result.stdout.length > 0, 'Expected non-empty stdout from "dir"');
+  console.log('✓ workspace.run_command "dir" exited with 0 and non-empty stdout.');
+
+  // 10. workspace.run_command with "cmd /c dir"
+  console.log('Executing command "cmd /c dir" via workspace.run_command...');
+  const cmdCmdDirResp = await client.request('workspace.run_command', { command: 'cmd /c dir' });
+  console.log('run_command "cmd /c dir" response:', JSON.stringify(cmdCmdDirResp));
+  assert.equal(cmdCmdDirResp.ok, true, `run_command "cmd /c dir" failed: ${JSON.stringify(cmdCmdDirResp.error)}`);
+  assert.equal(cmdCmdDirResp.result.exitCode, 0, `Expected exitCode 0, got ${cmdCmdDirResp.result.exitCode}`);
+  assert.ok(cmdCmdDirResp.result.stdout && cmdCmdDirResp.result.stdout.length > 0, 'Expected non-empty stdout from "cmd /c dir"');
+  console.log('✓ workspace.run_command "cmd /c dir" exited with 0 and non-empty stdout.');
+
   // 7. Verify files physically on disk
   console.log('Verifying physical files on disk in C:\\Users\\miski\\Desktop\\test...');
 

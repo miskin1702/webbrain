@@ -133,6 +133,8 @@ export const UNTRUSTED_CONTENT_TOOLS = new Set([
   'workspace_search_code',
   'workspace_read_file',
   'workspace_read_range',
+  'workspace_list_dir',
+  'workspace_glob',
   'workspace_apply_patch',
   'workspace_create_file',
   'workspace_git_diff',

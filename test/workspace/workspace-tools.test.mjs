@@ -25,16 +25,23 @@ const {
   WORKSPACE_COMMAND_TOOLS,
   WORKSPACE_TOOL_NAMES,
   SYSTEM_PROMPT_WORKSPACE,
+  WORKSPACE_CODING_PROMPT_GUIDANCE,
 } = await import(toUrl('src/chrome/src/agent/workspace-tools.js'));
 
 const {
   WORKSPACE_ALL_TOOLS: WORKSPACE_ALL_TOOLS_FX,
   WORKSPACE_TOOL_NAMES: WORKSPACE_TOOL_NAMES_FX,
+  WORKSPACE_CODING_PROMPT_GUIDANCE: WORKSPACE_CODING_PROMPT_GUIDANCE_FX,
 } = await import(toUrl('src/firefox/src/agent/workspace-tools.js'));
 
-const { getToolsForMode: getToolsCh } = await import(toUrl('src/chrome/src/agent/tools.js'));
-const { getToolsForMode: getToolsFx } = await import(toUrl('src/firefox/src/agent/tools.js'));
-
+const {
+  getToolsForMode: getToolsCh,
+  WORKSPACE_CODING_PROMPT_GUIDANCE: WORKSPACE_CODING_PROMPT_GUIDANCE_CH_TOOLS,
+} = await import(toUrl('src/chrome/src/agent/tools.js'));
+const {
+  getToolsForMode: getToolsFx,
+  WORKSPACE_CODING_PROMPT_GUIDANCE: WORKSPACE_CODING_PROMPT_GUIDANCE_FX_TOOLS,
+} = await import(toUrl('src/firefox/src/agent/tools.js'));
 const {
   Capability: CapCh,
   capabilityFor: capForCh,
@@ -86,19 +93,21 @@ function asyncTest(name, fn) {
 
 console.log('\n--- Workspace Tool Registry & Parity Tests ---');
 
-test('all 8 workspace tools have valid OpenAI function schemas', () => {
+test('all 10 workspace tools have valid OpenAI function schemas', () => {
   const expectedNames = [
     'workspace_status',
     'workspace_search_code',
     'workspace_read_file',
     'workspace_read_range',
+    'workspace_list_dir',
+    'workspace_glob',
     'workspace_apply_patch',
     'workspace_create_file',
     'workspace_git_diff',
     'workspace_run_command',
   ];
 
-  assert.equal(WORKSPACE_ALL_TOOLS.length, 8);
+  assert.equal(WORKSPACE_ALL_TOOLS.length, 10);
   for (const tool of WORKSPACE_ALL_TOOLS) {
     assert.equal(tool.type, 'function');
     assert.ok(tool.function.name);
@@ -107,6 +116,25 @@ test('all 8 workspace tools have valid OpenAI function schemas', () => {
     assert.equal(tool.function.parameters.type, 'object');
     assert.ok(Array.isArray(tool.function.parameters.required));
   }
+});
+
+test('workspace list dir tool declares optional path and max_entries', () => {
+  const listDir = WORKSPACE_ALL_TOOLS.find(t => t.function.name === 'workspace_list_dir');
+  assert.ok(listDir);
+  assert.deepEqual(listDir.function.parameters.required, []);
+  assert.ok(listDir.function.parameters.properties.path);
+  assert.ok(listDir.function.parameters.properties.max_entries);
+  assert.match(listDir.function.description, /list files and subdirectories/i);
+});
+
+test('workspace glob tool requires pattern and declares path and max_matches', () => {
+  const globTool = WORKSPACE_ALL_TOOLS.find(t => t.function.name === 'workspace_glob');
+  assert.ok(globTool);
+  assert.deepEqual(globTool.function.parameters.required, ['pattern']);
+  assert.ok(globTool.function.parameters.properties.pattern);
+  assert.ok(globTool.function.parameters.properties.path);
+  assert.ok(globTool.function.parameters.properties.max_matches);
+  assert.match(globTool.function.description, /glob pattern/i);
 });
 
 test('workspace search tool requires query and declares options', () => {
@@ -183,6 +211,8 @@ for (const [label, getTools] of [['chrome', getToolsCh], ['firefox', getToolsFx]
     const tools = getTools('ask', { workspaceConnected: true });
     const wsNames = tools.filter(t => t.function.name.startsWith('workspace_')).map(t => t.function.name);
     assert.deepEqual(wsNames.sort(), [
+      'workspace_glob',
+      'workspace_list_dir',
       'workspace_read_file',
       'workspace_read_range',
       'workspace_search_code',
@@ -195,11 +225,20 @@ for (const [label, getTools] of [['chrome', getToolsCh], ['firefox', getToolsFx]
     const wsNames = tools.filter(t => t.function.name.startsWith('workspace_')).map(t => t.function.name);
     assert.deepEqual(wsNames.sort(), [
       'workspace_git_diff',
+      'workspace_glob',
+      'workspace_list_dir',
       'workspace_read_file',
       'workspace_read_range',
       'workspace_search_code',
       'workspace_status',
     ].sort());
+  });
+
+  test(`[${label}] Dev mode with workspace connected exposes read tools including workspace_list_dir and workspace_glob`, () => {
+    const tools = getTools('dev', { workspaceConnected: true });
+    const wsNames = tools.filter(t => t.function.name.startsWith('workspace_')).map(t => t.function.name);
+    assert.ok(wsNames.includes('workspace_list_dir'));
+    assert.ok(wsNames.includes('workspace_glob'));
   });
 
   test(`[${label}] Act mode with workspaceCanWrite exposes workspace_apply_patch and workspace_create_file`, () => {
@@ -216,14 +255,14 @@ for (const [label, getTools] of [['chrome', getToolsCh], ['firefox', getToolsFx]
     assert.equal(wsNames.includes('workspace_apply_patch'), false);
   });
 
-  test(`[${label}] Full capabilities expose all 8 workspace tools`, () => {
+  test(`[${label}] Full capabilities expose all 10 workspace tools`, () => {
     const tools = getTools('act', {
       workspaceConnected: true,
       workspaceCanWrite: true,
       workspaceCanCommand: true,
     });
     const wsNames = tools.filter(t => t.function.name.startsWith('workspace_')).map(t => t.function.name);
-    assert.equal(wsNames.length, 8);
+    assert.equal(wsNames.length, 10);
   });
 }
 
@@ -248,12 +287,12 @@ for (const [label, Cap, capFor, hostFor, uct] of [
   });
 
   test(`[${label}] read-only workspace tools are ungated (capability === null)`, () => {
-    for (const name of ['workspace_status', 'workspace_search_code', 'workspace_read_file', 'workspace_read_range', 'workspace_git_diff']) {
+    for (const name of ['workspace_status', 'workspace_search_code', 'workspace_read_file', 'workspace_read_range', 'workspace_list_dir', 'workspace_glob', 'workspace_git_diff']) {
       assert.equal(capFor(name, {}), null, `${label}: ${name} should be ungated`);
     }
   });
 
-  test(`[${label}] all 8 workspace tools are in UNTRUSTED_CONTENT_TOOLS`, () => {
+  test(`[${label}] all 10 workspace tools are in UNTRUSTED_CONTENT_TOOLS`, () => {
     for (const tool of WORKSPACE_ALL_TOOLS) {
       assert.equal(uct.has(tool.function.name), true, `${label}: ${tool.function.name} must be in UNTRUSTED_CONTENT_TOOLS`);
     }
@@ -426,6 +465,74 @@ asyncTest('file revision cache updates on read, patch, and file.changed events',
   // 4. Create file updates cache
   await mgr.executeWorkspaceTool('workspace_create_file', { path: 'src/new.rs', content: 'fn main() {}' });
   assert.deepEqual(mgr.fileRevisionCache.get('src/new.rs')?.revision, 1);
+});
+asyncTest('executeWorkspaceTool dispatches workspace_list_dir and workspace_glob', async () => {
+  const calls = [];
+  const mockChrome = {
+    storage: {
+      local: {
+        get: async (defaults) => defaults,
+        set: async () => {},
+      },
+    },
+    runtime: {
+      sendMessage: async (msg) => {
+        if (msg.action === 'workspace_bridge_start') {
+          return { status: { connected: true, authenticated: true } };
+        }
+        if (msg.action === 'workspace_bridge_call') {
+          calls.push(msg);
+          if (msg.method === 'workspace.list_dir') {
+            return { ok: true, result: { path: '.', entries: [{ name: 'src', isDir: true }] } };
+          }
+          if (msg.method === 'workspace.glob') {
+            return { ok: true, result: { pattern: '*.js', matches: ['index.js'] } };
+          }
+        }
+        return { ok: true };
+      },
+    },
+  };
+
+  const mgr = createWorkspaceManager({ chromeApi: mockChrome, ensureOffscreen: async () => {} });
+  await mgr.connectWorkspace({});
+
+  const listRes = await mgr.executeWorkspaceTool('workspace_list_dir', { path: 'src', max_entries: 50 });
+  assert.equal(listRes.success, true);
+  assert.equal(listRes.entries.length, 1);
+  const listCall = calls.find(c => c.method === 'workspace.list_dir');
+  assert.ok(listCall);
+  assert.equal(listCall.params.path, 'src');
+  assert.equal(listCall.params.maxEntries, 50);
+
+  const globRes = await mgr.executeWorkspaceTool('workspace_glob', { pattern: '**/*.rs', path: '.', max_matches: 100 });
+  assert.equal(globRes.success, true);
+  assert.equal(globRes.matches.length, 1);
+  const globCall = calls.find(c => c.method === 'workspace.glob');
+  assert.ok(globCall);
+  assert.equal(globCall.params.pattern, '**/*.rs');
+  assert.equal(globCall.params.path, '.');
+  assert.equal(globCall.params.maxMatches, 100);
+});
+
+test('WORKSPACE_CODING_PROMPT_GUIDANCE contains explicit rules for coding agent', () => {
+  for (const [name, guidance] of [
+    ['workspace-tools (chrome)', WORKSPACE_CODING_PROMPT_GUIDANCE],
+    ['workspace-tools (firefox)', WORKSPACE_CODING_PROMPT_GUIDANCE_FX],
+    ['tools (chrome)', WORKSPACE_CODING_PROMPT_GUIDANCE_CH_TOOLS],
+    ['tools (firefox)', WORKSPACE_CODING_PROMPT_GUIDANCE_FX_TOOLS],
+  ]) {
+    assert.ok(guidance, `${name} missing guidance`);
+    assert.match(guidance, /workspace_list_dir/);
+    assert.match(guidance, /workspace_glob/);
+    assert.match(guidance, /workspace_run_command\('dir'\)/);
+    assert.match(guidance, /workspace_run_command\('ls'\)/);
+    assert.match(guidance, /workspace_create_file/);
+    assert.match(guidance, /workspace_apply_patch/);
+    assert.match(guidance, /workspace_search_code/);
+    assert.match(guidance, /workspace_read_range/);
+    assert.match(guidance, /workspace_read_file/);
+  }
 });
 console.log('\n--- Prompt Guidance Tests ---');
 

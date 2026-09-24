@@ -297,6 +297,48 @@ pub struct RunCommandResult {
     pub truncated: bool,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListDirParams {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(rename = "maxEntries", alias = "max_entries", default)]
+    pub max_entries: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirEntryInfo {
+    pub name: String,
+    #[serde(rename = "isDir", alias = "is_dir")]
+    pub is_dir: bool,
+    pub size: u64,
+    #[serde(default)]
+    pub modified: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListDirResult {
+    pub path: String,
+    pub entries: Vec<DirEntryInfo>,
+    pub total: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobParams {
+    pub pattern: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(rename = "maxMatches", alias = "max_matches", default)]
+    pub max_matches: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobResult {
+    pub matches: Vec<String>,
+    pub total: usize,
+    pub truncated: bool,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEventData {
     pub path: String,

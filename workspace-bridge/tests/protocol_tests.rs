@@ -10,8 +10,8 @@ use webbrain_workspace::auth::AuthManager;
 use webbrain_workspace::paths::PathSandbox;
 use webbrain_workspace::protocol::{
     error_codes, ApplyPatchParams, ApplyPatchResult, AuthHandshakeParams, AuthHandshakeResult,
-    ReadFileParams, ReadFileResult, RpcRequest, RpcResponse, WorkspaceStatusResult,
-    PROTOCOL_VERSION,
+    GlobParams, GlobResult, ListDirParams, ListDirResult, ReadFileParams, ReadFileResult,
+    RpcRequest, RpcResponse, WorkspaceStatusResult, PROTOCOL_VERSION,
 };
 use webbrain_workspace::server::{run_server, ServerState};
 use webbrain_workspace::session::WorkspaceSession;
@@ -289,4 +289,255 @@ async fn test_protocol_origin_rejection() {
         }
         other => panic!("Expected connection closure for untrusted origin, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn test_workspace_list_dir() {
+    let server = start_test_server().await;
+    let url = format!("ws://127.0.0.1:{}", server.port);
+
+    // Create directories and files
+    std::fs::create_dir_all(server.sandbox_path.join("dir_b")).unwrap();
+    std::fs::create_dir_all(server.sandbox_path.join("dir_a")).unwrap();
+    std::fs::write(server.sandbox_path.join("file_z.txt"), "hello z").unwrap();
+    std::fs::write(server.sandbox_path.join("file_a.txt"), "hello a").unwrap();
+    std::fs::write(server.sandbox_path.join("dir_a").join("nested.txt"), "inside dir_a").unwrap();
+
+    let (mut ws, _) = connect_async(&url).await.unwrap();
+
+    // Handshake
+    let handshake_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "auth_1".to_string(),
+        method: "auth.handshake".to_string(),
+        params: Some(
+            serde_json::to_value(AuthHandshakeParams {
+                token: server.token.clone(),
+                client: Some("test-agent".to_string()),
+                extension_id: None,
+                protocol_version: Some(PROTOCOL_VERSION),
+            })
+            .unwrap(),
+        ),
+    };
+    ws.send(Message::Text(serde_json::to_string(&handshake_req).unwrap().into()))
+        .await
+        .unwrap();
+    let _auth_resp = ws.next().await.unwrap().unwrap();
+
+    // 1. List root directory
+    let list_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "list_1".to_string(),
+        method: "workspace.list_dir".to_string(),
+        params: Some(serde_json::to_value(ListDirParams {
+            path: None,
+            max_entries: None,
+        }).unwrap()),
+    };
+    ws.send(Message::Text(serde_json::to_string(&list_req).unwrap().into()))
+        .await
+        .unwrap();
+
+    let msg = ws.next().await.unwrap().unwrap();
+    let resp: RpcResponse = serde_json::from_str(&msg.to_string()).unwrap();
+    assert!(resp.ok, "Expected ok response, got: {:?}", resp.error);
+    let result: ListDirResult = serde_json::from_value(resp.result.unwrap()).unwrap();
+
+    assert_eq!(result.total, 4);
+    assert!(!result.truncated);
+    // Directories first, sorted alphabetically: dir_a, dir_b, file_a.txt, file_z.txt
+    assert_eq!(result.entries[0].name, "dir_a");
+    assert!(result.entries[0].is_dir);
+    assert_eq!(result.entries[0].size, 0);
+    assert!(result.entries[0].modified.is_some());
+
+    assert_eq!(result.entries[1].name, "dir_b");
+    assert!(result.entries[1].is_dir);
+
+    assert_eq!(result.entries[2].name, "file_a.txt");
+    assert!(!result.entries[2].is_dir);
+    assert_eq!(result.entries[2].size, 7);
+    assert!(result.entries[2].modified.is_some());
+
+    assert_eq!(result.entries[3].name, "file_z.txt");
+    assert!(!result.entries[3].is_dir);
+
+    // 2. List with max_entries truncation
+    let list_trunc_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "list_2".to_string(),
+        method: "workspace.list_dir".to_string(),
+        params: Some(serde_json::to_value(ListDirParams {
+            path: Some(".".to_string()),
+            max_entries: Some(2),
+        }).unwrap()),
+    };
+    ws.send(Message::Text(serde_json::to_string(&list_trunc_req).unwrap().into()))
+        .await
+        .unwrap();
+
+    let msg = ws.next().await.unwrap().unwrap();
+    let resp: RpcResponse = serde_json::from_str(&msg.to_string()).unwrap();
+    let result: ListDirResult = serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.total, 4);
+    assert!(result.truncated);
+    assert_eq!(result.entries.len(), 2);
+
+    // 3. List subdirectory dir_a
+    let list_sub_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "list_3".to_string(),
+        method: "workspace.list_dir".to_string(),
+        params: Some(serde_json::to_value(ListDirParams {
+            path: Some("dir_a".to_string()),
+            max_entries: None,
+        }).unwrap()),
+    };
+    ws.send(Message::Text(serde_json::to_string(&list_sub_req).unwrap().into()))
+        .await
+        .unwrap();
+
+    let msg = ws.next().await.unwrap().unwrap();
+    let resp: RpcResponse = serde_json::from_str(&msg.to_string()).unwrap();
+    let result: ListDirResult = serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.entries.len(), 1);
+    assert_eq!(result.entries[0].name, "nested.txt");
+
+    // 4. List a file path -> error
+    let list_file_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "list_4".to_string(),
+        method: "workspace.list_dir".to_string(),
+        params: Some(serde_json::to_value(ListDirParams {
+            path: Some("file_a.txt".to_string()),
+            max_entries: None,
+        }).unwrap()),
+    };
+    ws.send(Message::Text(serde_json::to_string(&list_file_req).unwrap().into()))
+        .await
+        .unwrap();
+
+    let msg = ws.next().await.unwrap().unwrap();
+    let resp: RpcResponse = serde_json::from_str(&msg.to_string()).unwrap();
+    assert!(!resp.ok);
+    assert!(resp.error.unwrap().message.contains("not a directory"));
+}
+
+#[tokio::test]
+async fn test_workspace_glob() {
+    let server = start_test_server().await;
+    let url = format!("ws://127.0.0.1:{}", server.port);
+
+    // Create directory layout
+    let src = server.sandbox_path.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("main.rs"), "fn main() {}").unwrap();
+    std::fs::write(src.join("lib.rs"), "pub fn lib() {}").unwrap();
+
+    let tests_dir = server.sandbox_path.join("tests");
+    std::fs::create_dir_all(&tests_dir).unwrap();
+    std::fs::write(tests_dir.join("test.rs"), "// test").unwrap();
+
+    std::fs::write(server.sandbox_path.join("README.md"), "# Readme").unwrap();
+
+    // Gitignore file ignoring ignored.rs
+    std::fs::write(server.sandbox_path.join(".gitignore"), "ignored.rs\n").unwrap();
+    std::fs::write(server.sandbox_path.join("ignored.rs"), "// ignored").unwrap();
+
+    let (mut ws, _) = connect_async(&url).await.unwrap();
+
+    // Handshake
+    let handshake_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "auth_1".to_string(),
+        method: "auth.handshake".to_string(),
+        params: Some(
+            serde_json::to_value(AuthHandshakeParams {
+                token: server.token.clone(),
+                client: Some("test-agent".to_string()),
+                extension_id: None,
+                protocol_version: Some(PROTOCOL_VERSION),
+            })
+            .unwrap(),
+        ),
+    };
+    ws.send(Message::Text(serde_json::to_string(&handshake_req).unwrap().into()))
+        .await
+        .unwrap();
+    let _auth_resp = ws.next().await.unwrap().unwrap();
+
+    // 1. Glob all .rs files (respecting .gitignore)
+    let glob_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "glob_1".to_string(),
+        method: "workspace.glob".to_string(),
+        params: Some(serde_json::to_value(GlobParams {
+            pattern: "**/*.rs".to_string(),
+            path: None,
+            max_matches: None,
+        }).unwrap()),
+    };
+    ws.send(Message::Text(serde_json::to_string(&glob_req).unwrap().into()))
+        .await
+        .unwrap();
+
+    let msg = ws.next().await.unwrap().unwrap();
+    let resp: RpcResponse = serde_json::from_str(&msg.to_string()).unwrap();
+    assert!(resp.ok, "Expected ok, got: {:?}", resp.error);
+    let result: GlobResult = serde_json::from_value(resp.result.unwrap()).unwrap();
+
+    assert_eq!(result.total, 3);
+    assert!(!result.truncated);
+    assert!(result.matches.contains(&"src/lib.rs".to_string()));
+    assert!(result.matches.contains(&"src/main.rs".to_string()));
+    assert!(result.matches.contains(&"tests/test.rs".to_string()));
+    // Verify ignored.rs is omitted
+    assert!(!result.matches.contains(&"ignored.rs".to_string()));
+    // Verify README.md is omitted
+    assert!(!result.matches.contains(&"README.md".to_string()));
+
+    // 2. Glob scoped to src subdirectory
+    let glob_sub_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "glob_2".to_string(),
+        method: "workspace.glob".to_string(),
+        params: Some(serde_json::to_value(GlobParams {
+            pattern: "*.rs".to_string(),
+            path: Some("src".to_string()),
+            max_matches: None,
+        }).unwrap()),
+    };
+    ws.send(Message::Text(serde_json::to_string(&glob_sub_req).unwrap().into()))
+        .await
+        .unwrap();
+
+    let msg = ws.next().await.unwrap().unwrap();
+    let resp: RpcResponse = serde_json::from_str(&msg.to_string()).unwrap();
+    let result: GlobResult = serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.total, 2);
+    assert!(result.matches.contains(&"src/lib.rs".to_string()));
+    assert!(result.matches.contains(&"src/main.rs".to_string()));
+
+    // 3. Glob with max_matches truncation
+    let glob_trunc_req = RpcRequest {
+        v: PROTOCOL_VERSION,
+        id: "glob_3".to_string(),
+        method: "workspace.glob".to_string(),
+        params: Some(serde_json::to_value(GlobParams {
+            pattern: "**/*.rs".to_string(),
+            path: None,
+            max_matches: Some(1),
+        }).unwrap()),
+    };
+    ws.send(Message::Text(serde_json::to_string(&glob_trunc_req).unwrap().into()))
+        .await
+        .unwrap();
+
+    let msg = ws.next().await.unwrap().unwrap();
+    let resp: RpcResponse = serde_json::from_str(&msg.to_string()).unwrap();
+    let result: GlobResult = serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(result.total, 3);
+    assert!(result.truncated);
+    assert_eq!(result.matches.len(), 1);
 }

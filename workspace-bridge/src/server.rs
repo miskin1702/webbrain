@@ -6,9 +6,10 @@ use crate::patch::{apply_patch, PatchResult};
 use crate::paths::{PathSandbox, SandboxError};
 use crate::protocol::{
     error_codes, ApplyPatchParams, ApplyPatchResult, AuthHandshakeParams, AuthHandshakeResult,
-    CreateFileParams, CreateFileResult, GitDiffParams, ReadFileParams, ReadFileResult,
-    ReadRangeParams, ReadRangeResult, RpcEvent, RpcRequest, RpcResponse, RunCommandParams,
-    SearchCodeParams, WorkspaceStatusResult, PROTOCOL_VERSION,
+    CreateFileParams, CreateFileResult, DirEntryInfo, GitDiffParams, GlobParams, GlobResult,
+    ListDirParams, ListDirResult, ReadFileParams, ReadFileResult, ReadRangeParams, ReadRangeResult,
+    RpcEvent, RpcRequest, RpcResponse, RunCommandParams, SearchCodeParams, WorkspaceStatusResult,
+    PROTOCOL_VERSION,
 };
 use crate::search::search_code;
 use crate::session::WorkspaceSession;
@@ -816,6 +817,240 @@ async fn dispatch_method(state: &ServerState, req: RpcRequest) -> RpcResponse {
                 ),
                 Err(e) => RpcResponse::error(req_id, error_codes::INTERNAL_ERROR, e.to_string(), None),
             }
+        }
+
+        "workspace.list_dir" => {
+            let params: ListDirParams = match req.params {
+                Some(p) => match serde_json::from_value(p) {
+                    Ok(params) => params,
+                    Err(_) => {
+                        return RpcResponse::error(
+                            req_id,
+                            error_codes::INTERNAL_ERROR,
+                            "workspace.list_dir requires valid parameters",
+                            None,
+                        );
+                    }
+                },
+                None => ListDirParams {
+                    path: None,
+                    max_entries: None,
+                },
+            };
+
+            let req_path = params.path.as_deref().unwrap_or(".");
+            let trimmed = req_path.trim();
+            let lookup_path = if trimmed.is_empty() { "." } else { trimmed };
+
+            let resolved = match state.sandbox.resolve(lookup_path) {
+                Ok(p) => p,
+                Err(e) => return map_sandbox_error(req_id, e),
+            };
+
+            if !resolved.exists() {
+                return RpcResponse::error(
+                    req_id,
+                    error_codes::NOT_FOUND,
+                    format!("Directory not found: {lookup_path}"),
+                    None,
+                );
+            }
+
+            if !resolved.is_dir() {
+                return RpcResponse::error(
+                    req_id,
+                    error_codes::INTERNAL_ERROR,
+                    format!("Path is not a directory: {lookup_path}"),
+                    None,
+                );
+            }
+
+            let read_dir = match std::fs::read_dir(&resolved) {
+                Ok(rd) => rd,
+                Err(e) => {
+                    return RpcResponse::error(
+                        req_id,
+                        error_codes::INTERNAL_ERROR,
+                        format!("Failed to read directory: {e}"),
+                        None,
+                    );
+                }
+            };
+
+            let mut entries = Vec::new();
+            for entry in read_dir {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                let meta = entry.metadata().ok();
+                let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                let size = if is_dir {
+                    0
+                } else {
+                    meta.as_ref().map(|m| m.len()).unwrap_or(0)
+                };
+                let modified = meta
+                    .and_then(|m| m.modified().ok())
+                    .map(|st| chrono::DateTime::<chrono::Utc>::from(st).to_rfc3339());
+
+                entries.push(DirEntryInfo {
+                    name: file_name,
+                    is_dir,
+                    size,
+                    modified,
+                });
+            }
+
+            entries.sort_by(|a, b| {
+                b.is_dir
+                    .cmp(&a.is_dir)
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    .then_with(|| a.name.cmp(&b.name))
+            });
+
+            let total = entries.len();
+            let max_entries = params.max_entries.unwrap_or(200);
+            let truncated = total > max_entries;
+            if truncated {
+                entries.truncate(max_entries);
+            }
+
+            let rel_path = match state.sandbox.to_relative(&resolved) {
+                Ok(rel) if !rel.is_empty() => rel,
+                _ => ".".to_string(),
+            };
+
+            let result = ListDirResult {
+                path: rel_path,
+                entries,
+                total,
+                truncated,
+            };
+
+            RpcResponse::success(req_id, serde_json::to_value(result).unwrap())
+        }
+
+        "workspace.glob" => {
+            let params: GlobParams = match req.params {
+                Some(p) => match serde_json::from_value(p) {
+                    Ok(params) => params,
+                    Err(_) => {
+                        return RpcResponse::error(
+                            req_id,
+                            error_codes::INTERNAL_ERROR,
+                            "workspace.glob requires valid parameters",
+                            None,
+                        );
+                    }
+                },
+                None => {
+                    return RpcResponse::error(
+                        req_id,
+                        error_codes::INTERNAL_ERROR,
+                        "workspace.glob requires parameters",
+                        None,
+                    );
+                }
+            };
+
+            let req_path = params.path.as_deref().unwrap_or(".");
+            let trimmed = req_path.trim();
+            let lookup_path = if trimmed.is_empty() { "." } else { trimmed };
+
+            let resolved_base = match state.sandbox.resolve(lookup_path) {
+                Ok(p) => p,
+                Err(e) => return map_sandbox_error(req_id, e),
+            };
+
+            if !resolved_base.exists() {
+                return RpcResponse::error(
+                    req_id,
+                    error_codes::NOT_FOUND,
+                    format!("Path not found: {lookup_path}"),
+                    None,
+                );
+            }
+
+            if !resolved_base.is_dir() {
+                return RpcResponse::error(
+                    req_id,
+                    error_codes::INTERNAL_ERROR,
+                    format!("Path is not a directory: {lookup_path}"),
+                    None,
+                );
+            }
+
+            let matcher = match globset::GlobBuilder::new(&params.pattern)
+                .case_insensitive(true)
+                .literal_separator(false)
+                .build()
+            {
+                Ok(g) => g.compile_matcher(),
+                Err(e) => {
+                    return RpcResponse::error(
+                        req_id,
+                        error_codes::INTERNAL_ERROR,
+                        format!("Invalid glob pattern: {e}"),
+                        None,
+                    );
+                }
+            };
+
+            let mut builder = ignore::WalkBuilder::new(&resolved_base);
+            builder
+                .standard_filters(true)
+                .require_git(false)
+                .hidden(true);
+
+            let walker = builder.build();
+            let mut matches = Vec::new();
+
+            for entry in walker {
+                let dir_entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+
+                let path = dir_entry.path();
+                if path == resolved_base {
+                    continue;
+                }
+
+                let rel_ws = match state.sandbox.to_relative(path) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+
+                let rel_base = match path.strip_prefix(&resolved_base) {
+                    Ok(p) => p.to_string_lossy().replace('\\', "/"),
+                    Err(_) => continue,
+                };
+
+                if matcher.is_match(&rel_base) || matcher.is_match(&rel_ws) {
+                    matches.push(rel_ws);
+                }
+            }
+
+            matches.sort();
+            matches.dedup();
+
+            let total = matches.len();
+            let max_matches = params.max_matches.unwrap_or(200);
+            let truncated = total > max_matches;
+            if truncated {
+                matches.truncate(max_matches);
+            }
+
+            let result = GlobResult {
+                matches,
+                total,
+                truncated,
+            };
+
+            RpcResponse::success(req_id, serde_json::to_value(result).unwrap())
         }
 
         _ => RpcResponse::error(

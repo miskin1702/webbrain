@@ -312,6 +312,23 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
         };
         break;
 
+      case 'workspace_list_dir':
+        method = 'workspace.list_dir';
+        params = {
+          path: args.path !== undefined && args.path !== null ? String(args.path) : '.',
+          maxEntries: Number(args.max_entries ?? args.maxEntries) || 200,
+        };
+        break;
+
+      case 'workspace_glob':
+        method = 'workspace.glob';
+        params = {
+          pattern: String(args.pattern || ''),
+          path: args.path !== undefined && args.path !== null ? String(args.path) : '.',
+          maxMatches: Number(args.max_matches ?? args.maxMatches) || 200,
+        };
+        break;
+
       case 'workspace_apply_patch':
         method = 'workspace.apply_patch';
         params = {

@@ -78,3 +78,51 @@ async fn test_command_timeout_and_process_cleanup() {
     assert_eq!(res.exit_code, None);
     assert!(res.stderr.contains("timed out"));
 }
+
+#[tokio::test]
+async fn test_command_execution_shell_builtin_dir() {
+    let temp = tempdir().unwrap();
+    let sandbox = PathSandbox::new(temp.path()).unwrap();
+
+    std::fs::write(temp.path().join("shell_marker.txt"), "shell_content").unwrap();
+
+    #[cfg(windows)]
+    let command = "dir".to_string();
+    #[cfg(not(windows))]
+    let command = "ls".to_string();
+
+    let params = RunCommandParams {
+        command,
+        args: None,
+        timeout_ms: Some(5000),
+    };
+
+    let res = run_command(&sandbox, &params, true).await.unwrap();
+    assert_eq!(res.exit_code, Some(0));
+    assert!(res.stdout.contains("shell_marker.txt"));
+    assert!(!res.timed_out);
+}
+
+#[tokio::test]
+async fn test_command_execution_cmd_c_dir() {
+    let temp = tempdir().unwrap();
+    let sandbox = PathSandbox::new(temp.path()).unwrap();
+
+    std::fs::write(temp.path().join("cmd_marker.txt"), "cmd_content").unwrap();
+
+    #[cfg(windows)]
+    let command = "cmd /c dir".to_string();
+    #[cfg(not(windows))]
+    let command = "sh -c ls".to_string();
+
+    let params = RunCommandParams {
+        command,
+        args: None,
+        timeout_ms: Some(5000),
+    };
+
+    let res = run_command(&sandbox, &params, true).await.unwrap();
+    assert_eq!(res.exit_code, Some(0));
+    assert!(res.stdout.contains("cmd_marker.txt"));
+    assert!(!res.timed_out);
+}

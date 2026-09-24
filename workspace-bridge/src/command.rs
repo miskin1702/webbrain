@@ -48,16 +48,32 @@ pub async fn run_command(
     let timeout_duration = Duration::from_millis(timeout_ms);
 
     let root = sandbox.canonical_root();
-    let args = params.args.clone().unwrap_or_default();
-
     let start_time = Instant::now();
 
-    let mut cmd = Command::new(&params.command);
-    cmd.args(&args)
-        .current_dir(root)
+    let mut cmd = match &params.args {
+        Some(args) if !args.is_empty() => {
+            let mut c = Command::new(&params.command);
+            c.args(args);
+            c
+        }
+        _ => {
+            #[cfg(windows)]
+            {
+                let mut c = Command::new("cmd.exe");
+                c.args(["/d", "/s", "/c", &params.command]);
+                c
+            }
+            #[cfg(not(windows))]
+            {
+                let mut c = Command::new("sh");
+                c.args(["-c", &params.command]);
+                c
+            }
+        }
+    };
+    cmd.current_dir(root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
     // Spawn child
     let mut child = cmd
         .spawn()
