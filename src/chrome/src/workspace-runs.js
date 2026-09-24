@@ -210,18 +210,32 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
     } catch {}
   }
 
-  function handleWorkspaceConnected(session) {
+  async function handleWorkspaceConnected(session) {
     state.connected = true;
     state.authenticated = true;
     state.lastError = '';
     applySession(session);
+    try {
+      const status = await getWorkspaceStatus();
+      chromeApi.runtime.sendMessage({
+        action: 'workspace_status_changed',
+        status,
+      }).catch(() => {});
+    } catch {}
   }
 
-  function handleWorkspaceDisconnected() {
+  async function handleWorkspaceDisconnected() {
     state.connected = false;
     state.authenticated = false;
     state.sessionId = null;
     fileRevisionCache.clear();
+    try {
+      const status = await getWorkspaceStatus();
+      chromeApi.runtime.sendMessage({
+        action: 'workspace_status_changed',
+        status,
+      }).catch(() => {});
+    } catch {}
   }
 
   function isConnected() {
@@ -245,10 +259,10 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
     }
 
     // Permission checks
-    if (name === 'workspace_apply_patch' && !canWrite()) {
+    if ((name === 'workspace_apply_patch' || name === 'workspace_create_file') && !canWrite()) {
       return {
         success: false,
-        error: 'Workspace write capability is not authorized. Enable "Allow file edits" in Settings to apply patches.',
+        error: `Workspace write capability is not authorized. Enable "Allow file edits" in Settings to ${name === 'workspace_create_file' ? 'create files' : 'apply patches'}.`,
       };
     }
 
@@ -309,6 +323,15 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
           newText: args.new_text ?? args.newText ?? undefined,
         };
         break;
+      case 'workspace_create_file':
+        method = 'workspace.create_file';
+        params = {
+          path: String(args.path || ''),
+          content: String(args.content ?? ''),
+          overwrite: args.overwrite === true,
+        };
+        break;
+
 
       case 'workspace_git_diff':
         method = 'workspace.git_diff';
@@ -371,6 +394,15 @@ export function createWorkspaceManager({ chromeApi = chrome, ensureOffscreen }) 
           hash: result.newHash || '',
           timestamp: Date.now(),
         });
+      } else if (name === 'workspace_create_file' && result.path) {
+        fileRevisionCache.delete(result.path);
+        if (result.revision != null) {
+          fileRevisionCache.set(result.path, {
+            revision: result.revision,
+            hash: result.hash || '',
+            timestamp: Date.now(),
+          });
+        }
       }
 
       return {

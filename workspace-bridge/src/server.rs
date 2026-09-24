@@ -1,14 +1,14 @@
 use crate::auth::AuthManager;
 use crate::command::run_command;
-use crate::files::{atomic_write, read_range, read_text_file};
+use crate::files::{atomic_write, read_range, read_text_file, LineEnding};
 use crate::git::{get_git_diff, is_git_repository};
-use crate::patch::apply_patch;
+use crate::patch::{apply_patch, PatchResult};
 use crate::paths::{PathSandbox, SandboxError};
 use crate::protocol::{
     error_codes, ApplyPatchParams, ApplyPatchResult, AuthHandshakeParams, AuthHandshakeResult,
-    GitDiffParams, ReadFileParams, ReadFileResult, ReadRangeParams, ReadRangeResult, RpcEvent,
-    RpcRequest, RpcResponse, RunCommandParams, SearchCodeParams, WorkspaceStatusResult,
-    PROTOCOL_VERSION,
+    CreateFileParams, CreateFileResult, GitDiffParams, ReadFileParams, ReadFileResult,
+    ReadRangeParams, ReadRangeResult, RpcEvent, RpcRequest, RpcResponse, RunCommandParams,
+    SearchCodeParams, WorkspaceStatusResult, PROTOCOL_VERSION,
 };
 use crate::search::search_code;
 use crate::session::WorkspaceSession;
@@ -456,6 +456,116 @@ async fn dispatch_method(state: &ServerState, req: RpcRequest) -> RpcResponse {
 
             let rel_path = state.sandbox.to_relative(&resolved).unwrap_or(params.path);
 
+            if !resolved.exists() {
+                if params.expected_revision > 1 {
+                    return RpcResponse::error(
+                        req_id,
+                        error_codes::REVISION_CONFLICT,
+                        format!(
+                            "Revision conflict on {rel_path}: file does not exist but expected revision is {}",
+                            params.expected_revision
+                        ),
+                        Some(serde_json::json!({
+                            "expectedRevision": params.expected_revision,
+                            "currentRevision": 0,
+                        })),
+                    );
+                }
+
+                let old_is_empty = params.old_text.as_deref().unwrap_or("").is_empty();
+                if !old_is_empty && params.patch.is_none() {
+                    return RpcResponse::error(
+                        req_id,
+                        error_codes::NOT_FOUND,
+                        format!("File not found: {}", resolved.display()),
+                        None,
+                    );
+                }
+
+                let patch_res = if let Some(new_text) = params.new_text {
+                    let lines_added = new_text.lines().count();
+                    PatchResult {
+                        new_content: new_text,
+                        lines_added,
+                        lines_removed: 0,
+                        summary: format!("+{lines_added} / -0 lines in {rel_path}"),
+                    }
+                } else if let Some(patch_str) = params.patch.as_deref() {
+                    match apply_patch("", None, None, Some(patch_str), &rel_path) {
+                        Ok(pr) => pr,
+                        Err(crate::patch::PatchError::ContextNotFound(msg)) => {
+                            return RpcResponse::error(req_id, error_codes::PATCH_REJECTED, msg, None);
+                        }
+                        Err(crate::patch::PatchError::AmbiguousContext {
+                            occurrences,
+                            message,
+                        }) => {
+                            return RpcResponse::error(
+                                req_id,
+                                error_codes::PATCH_REJECTED,
+                                format!("Ambiguous context ({occurrences} occurrences): {message}"),
+                                Some(serde_json::json!({ "occurrences": occurrences })),
+                            );
+                        }
+                        Err(e) => {
+                            return RpcResponse::error(
+                                req_id,
+                                error_codes::PATCH_REJECTED,
+                                e.to_string(),
+                                None,
+                            );
+                        }
+                    }
+                } else {
+                    PatchResult {
+                        new_content: String::new(),
+                        lines_added: 0,
+                        lines_removed: 0,
+                        summary: format!("+0 / -0 lines in {rel_path}"),
+                    }
+                };
+
+                #[cfg(windows)]
+                let default_line_ending = LineEnding::CrLf;
+                #[cfg(not(windows))]
+                let default_line_ending = LineEnding::Lf;
+
+                let new_hash = match atomic_write(
+                    &resolved,
+                    &patch_res.new_content,
+                    false,
+                    Some(default_line_ending),
+                ) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        return RpcResponse::error(
+                            req_id,
+                            error_codes::INTERNAL_ERROR,
+                            format!("Write failed: {e}"),
+                            None,
+                        );
+                    }
+                };
+
+                let new_mtime = std::fs::metadata(&resolved)
+                    .and_then(|m| m.modified())
+                    .unwrap_or_else(|_| std::time::SystemTime::now());
+                let new_size = patch_res.new_content.len();
+
+                let (old_rev, new_rev) =
+                    state.session.commit_new_file(&rel_path, &new_hash, new_mtime, new_size);
+
+                let result = ApplyPatchResult {
+                    path: rel_path,
+                    old_revision: old_rev,
+                    new_revision: new_rev,
+                    new_hash,
+                    diff_summary: patch_res.summary,
+                };
+
+                return RpcResponse::success(req_id, serde_json::to_value(result).unwrap());
+            }
+
             // Read current file
             let current_read = match read_text_file(&resolved, None) {
                 Ok(r) => r,
@@ -573,6 +683,92 @@ async fn dispatch_method(state: &ServerState, req: RpcRequest) -> RpcResponse {
                 new_revision: new_rev,
                 new_hash,
                 diff_summary: patch_res.summary,
+            };
+
+            RpcResponse::success(req_id, serde_json::to_value(result).unwrap())
+        }
+
+        "workspace.create_file" => {
+            if !state.session.allow_write {
+                return RpcResponse::error(
+                    req_id,
+                    error_codes::COMMAND_NOT_ALLOWED,
+                    "Workspace editing is disabled. Enable --allow-write to make changes.",
+                    None,
+                );
+            }
+
+            let params: CreateFileParams =
+                match req.params.and_then(|p| serde_json::from_value(p).ok()) {
+                    Some(p) => p,
+                    None => {
+                        return RpcResponse::error(
+                            req_id,
+                            error_codes::INTERNAL_ERROR,
+                            "workspace.create_file requires valid parameters",
+                            None,
+                        );
+                    }
+                };
+
+            let resolved = match state.sandbox.resolve(&params.path) {
+                Ok(p) => p,
+                Err(e) => return map_sandbox_error(req_id, e),
+            };
+
+            let rel_path = state.sandbox.to_relative(&resolved).unwrap_or(params.path);
+
+            let file_exists = resolved.exists();
+            if file_exists && params.overwrite != Some(true) {
+                return RpcResponse::error(
+                    req_id,
+                    error_codes::INTERNAL_ERROR,
+                    format!("File already exists: {rel_path}"),
+                    None,
+                );
+            }
+
+            #[cfg(windows)]
+            let default_line_ending = LineEnding::CrLf;
+            #[cfg(not(windows))]
+            let default_line_ending = LineEnding::Lf;
+
+            let new_hash = match atomic_write(
+                &resolved,
+                &params.content,
+                false,
+                Some(default_line_ending),
+            ) {
+                Ok(h) => h,
+                Err(e) => {
+                    return RpcResponse::error(
+                        req_id,
+                        error_codes::INTERNAL_ERROR,
+                        format!("Write failed: {e}"),
+                        None,
+                    );
+                }
+            };
+
+            let new_mtime = std::fs::metadata(&resolved)
+                .and_then(|m| m.modified())
+                .unwrap_or_else(|_| std::time::SystemTime::now());
+            let new_size = params.content.len();
+
+            let revision = if file_exists {
+                let (_old_rev, new_rev) =
+                    state.session.commit_revision(&rel_path, &new_hash, new_mtime, new_size);
+                new_rev
+            } else {
+                let (_old_rev, new_rev) =
+                    state.session.commit_new_file(&rel_path, &new_hash, new_mtime, new_size);
+                new_rev
+            };
+
+            let result = CreateFileResult {
+                path: rel_path,
+                revision,
+                hash: new_hash,
             };
 
             RpcResponse::success(req_id, serde_json::to_value(result).unwrap())

@@ -5,6 +5,7 @@ import { OTP_EMAIL_TOOL, OTP_EMAIL_TOOL_NAME } from './otp-email-tool.js';
 import {
   WORKSPACE_READ_TOOLS,
   WORKSPACE_APPLY_PATCH_TOOL,
+  WORKSPACE_CREATE_FILE_TOOL,
   WORKSPACE_GIT_DIFF_TOOL,
   WORKSPACE_RUN_COMMAND_TOOL,
   WORKSPACE_TOOL_NAMES,
@@ -1627,7 +1628,7 @@ export function getToolsForMode(mode, opts = {}) {
     } else {
       base = [...base, ...WORKSPACE_READ_TOOLS];
       if (opts.workspaceCanWrite === true) {
-        base = [...base, WORKSPACE_APPLY_PATCH_TOOL];
+        base = [...base, WORKSPACE_APPLY_PATCH_TOOL, WORKSPACE_CREATE_FILE_TOOL];
       }
       base = [...base, WORKSPACE_GIT_DIFF_TOOL];
       if (opts.workspaceCanCommand === true) {

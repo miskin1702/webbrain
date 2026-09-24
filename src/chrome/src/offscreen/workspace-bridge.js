@@ -24,6 +24,34 @@
 
   // Correlation map: requestId -> { resolve, reject, timer, method }
   const pendingRequests = new Map();
+  // Handshake completion waiters
+  const handshakeWaiters = new Set();
+
+  function notifyHandshakeWaiters() {
+    for (const waiter of handshakeWaiters) {
+      try { waiter(); } catch {}
+    }
+    handshakeWaiters.clear();
+  }
+
+  function waitForHandshake(timeoutMs = 4000) {
+    if (authenticated) {
+      return Promise.resolve(getStatus());
+    }
+    if (!socket || !enabled) {
+      return Promise.resolve(getStatus());
+    }
+    return new Promise((resolve) => {
+      let timer = null;
+      const onDone = () => {
+        clearTimeout(timer);
+        handshakeWaiters.delete(onDone);
+        resolve(getStatus());
+      };
+      timer = setTimeout(onDone, timeoutMs);
+      handshakeWaiters.add(onDone);
+    });
+  }
 
   function normalizeWorkspaceUrl(value) {
     const raw = String(value || DEFAULT_WORKSPACE_BRIDGE_URL).trim();
@@ -144,10 +172,10 @@
     });
   }
 
-  function connect() {
-    if (!enabled || !bridgeUrl) return;
+  function connect(timeoutMs = 4000) {
+    if (!enabled || !bridgeUrl) return waitForHandshake(timeoutMs);
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-      return;
+      return waitForHandshake(timeoutMs);
     }
 
     try {
@@ -165,8 +193,9 @@
           session = authResult;
           reconnectAttempt = 0;
           lastError = '';
+          notifyHandshakeWaiters();
 
-          // Broadcast connected event to background
+          // Broadcast connected event to background, sidepanel, and settings
           try {
             chrome.runtime.sendMessage({
               target: 'background',
@@ -174,11 +203,18 @@
               session: authResult,
             }).catch(() => {});
           } catch {}
+          try {
+            chrome.runtime.sendMessage({
+              action: 'workspace_status_changed',
+              status: getStatus(),
+            }).catch(() => {});
+          } catch {}
         } catch (authError) {
           if (socket !== nextSocket) return;
           lastError = authError.message || String(authError);
           authenticated = false;
           session = null;
+          notifyHandshakeWaiters();
           try { nextSocket.close(); } catch {}
         }
       });
@@ -231,11 +267,18 @@
         authenticated = false;
         session = null;
         clearPendingRequests(new Error('Workspace bridge connection closed'));
+        notifyHandshakeWaiters();
 
         try {
           chrome.runtime.sendMessage({
             target: 'background',
             action: 'workspace_disconnected',
+          }).catch(() => {});
+        } catch {}
+        try {
+          chrome.runtime.sendMessage({
+            action: 'workspace_status_changed',
+            status: getStatus(),
           }).catch(() => {});
         } catch {}
 
@@ -245,14 +288,18 @@
       nextSocket.addEventListener('error', () => {
         if (socket !== nextSocket) return;
         lastError = 'WebSocket connection error';
+        notifyHandshakeWaiters();
       });
     } catch (e) {
       lastError = e.message || String(e);
       socket = null;
       authenticated = false;
       session = null;
+      notifyHandshakeWaiters();
       scheduleReconnect();
     }
+
+    return waitForHandshake(timeoutMs);
   }
 
   // Chrome runtime message routing
@@ -260,29 +307,32 @@
     const action = msg.action || msg.type;
 
     if (action === 'workspace_bridge_start' || action === 'workspace-bridge-start') {
-      try {
-        const nextUrl = normalizeWorkspaceUrl(msg.url || bridgeUrl);
-        const changed = bridgeUrl !== nextUrl || pairingToken !== (msg.token || '');
-        bridgeUrl = nextUrl;
-        pairingToken = String(msg.token || '').trim();
-        enabled = true;
+      (async () => {
+        try {
+          const nextUrl = normalizeWorkspaceUrl(msg.url || bridgeUrl);
+          const changed = bridgeUrl !== nextUrl || pairingToken !== (msg.token || '');
+          bridgeUrl = nextUrl;
+          pairingToken = String(msg.token || '').trim();
+          enabled = true;
 
-        if (changed && socket) {
-          const prev = socket;
-          socket = null;
-          authenticated = false;
-          session = null;
-          clearPendingRequests(new Error('Reconnecting with updated workspace config'));
-          try { prev.close(); } catch {}
+          if (changed && socket) {
+            const prev = socket;
+            socket = null;
+            authenticated = false;
+            session = null;
+            clearPendingRequests(new Error('Reconnecting with updated workspace config'));
+            try { prev.close(); } catch {}
+          }
+
+          connect();
+          await waitForHandshake(4000);
+          sendResponse({ ok: true, status: getStatus() });
+        } catch (err) {
+          lastError = err.message || String(err);
+          sendResponse({ ok: false, error: lastError, status: getStatus() });
         }
-
-        connect();
-        sendResponse({ ok: true, status: getStatus() });
-      } catch (err) {
-        lastError = err.message || String(err);
-        sendResponse({ ok: false, error: lastError, status: getStatus() });
-      }
-      return false;
+      })();
+      return true; // Keep message channel open for async response
     }
 
     if (action === 'workspace_bridge_stop' || action === 'workspace-bridge-stop') {
@@ -293,6 +343,7 @@
       authenticated = false;
       session = null;
 
+      notifyHandshakeWaiters();
       if (socket) {
         const prev = socket;
         socket = null;

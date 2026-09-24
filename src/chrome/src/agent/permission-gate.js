@@ -143,6 +143,7 @@ export const UNTRUSTED_CONTENT_TOOLS = new Set([
   'workspace_read_file',
   'workspace_read_range',
   'workspace_apply_patch',
+  'workspace_create_file',
   'workspace_git_diff',
   'workspace_run_command',
 ]);
@@ -433,6 +434,7 @@ const TOOL_CAPABILITY = {
   schedule_resume: Capability.SCHEDULE,
   schedule_task: Capability.SCHEDULE,
   workspace_apply_patch: Capability.WORKSPACE_WRITE,
+  workspace_create_file: Capability.WORKSPACE_WRITE,
   workspace_run_command: Capability.WORKSPACE_COMMAND,
 };
 

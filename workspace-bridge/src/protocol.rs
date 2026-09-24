@@ -245,6 +245,21 @@ pub struct ApplyPatchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateFileParams {
+    pub path: String,
+    pub content: String,
+    #[serde(default)]
+    pub overwrite: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateFileResult {
+    pub path: String,
+    pub revision: u64,
+    pub hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitDiffParams {
     #[serde(default)]
     pub paths: Option<Vec<String>>,

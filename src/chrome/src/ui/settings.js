@@ -744,13 +744,34 @@ function renderWorkspaceBridgeStatus(status = {}) {
   }
 }
 
+let workspaceBridgeStatusPollTimer = null;
+let workspaceBridgeStatusRequestPending = false;
+
 async function refreshWorkspaceBridgeStatus() {
+  if (workspaceBridgeStatusRequestPending) return;
+  workspaceBridgeStatusRequestPending = true;
   try {
     const status = await sendToBackground('workspace_status');
     renderWorkspaceBridgeStatus(status);
   } catch (error) {
     setWorkspaceBridgeStatus('error', error.message || 'Status check failed');
+  } finally {
+    workspaceBridgeStatusRequestPending = false;
   }
+}
+
+function startWorkspaceBridgeStatusPolling() {
+  if (workspaceBridgeStatusPollTimer) return;
+  workspaceBridgeStatusPollTimer = setInterval(() => {
+    if (workspaceBridgeToggle?.checked) {
+      refreshWorkspaceBridgeStatus();
+    }
+  }, 2500);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && workspaceBridgeToggle?.checked) {
+      refreshWorkspaceBridgeStatus();
+    }
+  });
 }
 
 async function saveWorkspaceBridgeConfig() {
@@ -810,6 +831,13 @@ async function initWorkspaceBridgeSettings(stored) {
   workspaceBridgeTokenInput?.addEventListener('change', () => {
     if (workspaceBridgeToggle.checked) saveWorkspaceBridgeConfig();
   });
+
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.action === 'workspace_status_changed' || msg.action === 'workspace_connected') {
+      refreshWorkspaceBridgeStatus();
+    }
+  });
+  startWorkspaceBridgeStatusPolling();
 }
 
 function formatUsd(value) {

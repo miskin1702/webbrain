@@ -33533,7 +33533,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       : {};
     const earlyCdpAbortSignal = dispatchContext._contentActionAbortSignal || null;
     const earlyCdpDispatchState = dispatchContext._contentActionDispatchState || { started: false };
-    if (name.startsWith('workspace_')) {
+    if (name.startsWith('workspace_') || name === 'workspace_create_file') {
       return await this._executeWorkspaceTool(name, args, { tabId, onUpdate, signal: earlyCdpAbortSignal });
     }
     const throwIfEarlyCdpAborted = () => this._throwIfAborted(earlyCdpAbortSignal);

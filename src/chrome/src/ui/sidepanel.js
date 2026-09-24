@@ -9583,6 +9583,10 @@ chrome.runtime.onMessage.addListener((msg) => {
 });
 
 chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.action === 'workspace_status_changed') {
+    void updateWorkspaceBadge();
+    return;
+  }
   if (msg?.target !== 'sidepanel') return;
   if (['workspace_event', 'workspace_connected', 'workspace_disconnected'].includes(msg.action)) {
     void updateWorkspaceBadge();

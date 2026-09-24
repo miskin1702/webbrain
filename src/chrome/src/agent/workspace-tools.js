@@ -110,7 +110,7 @@ export const WORKSPACE_APPLY_PATCH_TOOL = {
   type: 'function',
   function: {
     name: 'workspace_apply_patch',
-    description: 'Apply an atomic, context-checked patch or replacement to a workspace file. Requires expected_revision from a previous read. Rejects stale edits if the file has changed externally. After patching, always check workspace_git_diff to review changes.',
+    description: 'Apply an atomic, context-checked patch or replacement to a workspace file. Requires expected_revision from a previous read. Rejects stale edits if the file has changed externally. Can also create a new file if it does not exist (pass expected_revision: 0 and old_text: ""). After patching, always check workspace_git_diff to review changes.',
     parameters: {
       type: 'object',
       properties: {
@@ -140,6 +140,32 @@ export const WORKSPACE_APPLY_PATCH_TOOL = {
         },
       },
       required: ['path', 'expected_revision'],
+    },
+  },
+};
+
+export const WORKSPACE_CREATE_FILE_TOOL = {
+  type: 'function',
+  function: {
+    name: 'workspace_create_file',
+    description: 'Create a new file in the workspace with initial text content. Fails if the file already exists (use workspace_apply_patch to edit existing files).',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Relative path of the new file from the workspace root (e.g. "src/new-file.js"). Traversal outside root is rejected.',
+        },
+        content: {
+          type: 'string',
+          description: 'Initial text content to write into the new file.',
+        },
+        overwrite: {
+          type: 'boolean',
+          description: 'Whether to overwrite if the file already exists (default false).',
+        },
+      },
+      required: ['path', 'content'],
     },
   },
 };
@@ -203,6 +229,7 @@ export const WORKSPACE_READ_TOOLS = [
 
 export const WORKSPACE_WRITE_TOOLS = [
   WORKSPACE_APPLY_PATCH_TOOL,
+  WORKSPACE_CREATE_FILE_TOOL,
   WORKSPACE_GIT_DIFF_TOOL,
 ];
 
@@ -215,6 +242,7 @@ export const WORKSPACE_ALL_TOOLS = [
   ...WORKSPACE_WRITE_TOOLS,
   ...WORKSPACE_COMMAND_TOOLS,
 ];
+export const WORKSPACE_TOOLS = WORKSPACE_ALL_TOOLS;
 
 export const WORKSPACE_TOOL_NAMES = new Set(WORKSPACE_ALL_TOOLS.map(t => t.function.name));
 export const WORKSPACE_READ_TOOL_NAMES = new Set(WORKSPACE_READ_TOOLS.map(t => t.function.name));

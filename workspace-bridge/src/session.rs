@@ -196,6 +196,38 @@ impl WorkspaceSession {
         }
     }
 
+    /// Commit revision 1 for a newly created file.
+    pub fn commit_new_file(
+        &self,
+        relative_path: &str,
+        new_hash: &str,
+        new_mtime: SystemTime,
+        new_size: usize,
+    ) -> (u64, u64) {
+        self.touch_activity();
+        let mut files = self.opened_files.write();
+
+        if let Some(existing) = files.get_mut(relative_path) {
+            let old_rev = existing.revision;
+            let new_rev = old_rev + 1;
+            existing.revision = new_rev;
+            existing.hash = new_hash.to_string();
+            existing.mtime = new_mtime;
+            existing.size = new_size;
+            (old_rev, new_rev)
+        } else {
+            let state = FileState {
+                relative_path: relative_path.to_string(),
+                revision: 1,
+                hash: new_hash.to_string(),
+                mtime: new_mtime,
+                size: new_size,
+            };
+            files.insert(relative_path.to_string(), state);
+            (0, 1)
+        }
+    }
+
     /// Notify that an external change occurred on a file (e.g. from file watcher).
     pub fn invalidate_external_change(&self, relative_path: &str, new_hash: Option<&str>) {
         let mut files = self.opened_files.write();

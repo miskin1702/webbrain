@@ -86,18 +86,19 @@ function asyncTest(name, fn) {
 
 console.log('\n--- Workspace Tool Registry & Parity Tests ---');
 
-test('all 7 workspace tools have valid OpenAI function schemas', () => {
+test('all 8 workspace tools have valid OpenAI function schemas', () => {
   const expectedNames = [
     'workspace_status',
     'workspace_search_code',
     'workspace_read_file',
     'workspace_read_range',
     'workspace_apply_patch',
+    'workspace_create_file',
     'workspace_git_diff',
     'workspace_run_command',
   ];
 
-  assert.equal(WORKSPACE_ALL_TOOLS.length, 7);
+  assert.equal(WORKSPACE_ALL_TOOLS.length, 8);
   for (const tool of WORKSPACE_ALL_TOOLS) {
     assert.equal(tool.type, 'function');
     assert.ok(tool.function.name);
@@ -137,6 +138,21 @@ test('workspace apply patch tool requires path and expected_revision', () => {
   assert.ok(patch.function.parameters.properties.patch);
   assert.ok(patch.function.parameters.properties.old_text);
   assert.ok(patch.function.parameters.properties.new_text);
+});
+
+test('workspace create file tool requires path and content and declares overwrite', () => {
+  const createFile = WORKSPACE_ALL_TOOLS.find(t => t.function.name === 'workspace_create_file');
+  assert.ok(createFile);
+  assert.deepEqual(createFile.function.parameters.required, ['path', 'content']);
+  assert.ok(createFile.function.parameters.properties.path);
+  assert.ok(createFile.function.parameters.properties.content);
+  assert.ok(createFile.function.parameters.properties.overwrite);
+});
+
+test('workspace apply patch tool mentions creating new files', () => {
+  const patch = WORKSPACE_ALL_TOOLS.find(t => t.function.name === 'workspace_apply_patch');
+  assert.ok(patch);
+  assert.match(patch.function.description, /create a new file/i);
 });
 
 test('Chrome and Firefox workspace tool definitions stay in parity', () => {
@@ -186,13 +202,13 @@ for (const [label, getTools] of [['chrome', getToolsCh], ['firefox', getToolsFx]
     ].sort());
   });
 
-  test(`[${label}] Act mode with workspaceCanWrite exposes workspace_apply_patch`, () => {
+  test(`[${label}] Act mode with workspaceCanWrite exposes workspace_apply_patch and workspace_create_file`, () => {
     const tools = getTools('act', { workspaceConnected: true, workspaceCanWrite: true });
     const wsNames = tools.filter(t => t.function.name.startsWith('workspace_')).map(t => t.function.name);
     assert.equal(wsNames.includes('workspace_apply_patch'), true);
+    assert.equal(wsNames.includes('workspace_create_file'), true);
     assert.equal(wsNames.includes('workspace_run_command'), false);
   });
-
   test(`[${label}] Act mode with workspaceCanCommand exposes workspace_run_command`, () => {
     const tools = getTools('act', { workspaceConnected: true, workspaceCanCommand: true });
     const wsNames = tools.filter(t => t.function.name.startsWith('workspace_')).map(t => t.function.name);
@@ -200,14 +216,14 @@ for (const [label, getTools] of [['chrome', getToolsCh], ['firefox', getToolsFx]
     assert.equal(wsNames.includes('workspace_apply_patch'), false);
   });
 
-  test(`[${label}] Full capabilities expose all 7 workspace tools`, () => {
+  test(`[${label}] Full capabilities expose all 8 workspace tools`, () => {
     const tools = getTools('act', {
       workspaceConnected: true,
       workspaceCanWrite: true,
       workspaceCanCommand: true,
     });
     const wsNames = tools.filter(t => t.function.name.startsWith('workspace_')).map(t => t.function.name);
-    assert.equal(wsNames.length, 7);
+    assert.equal(wsNames.length, 8);
   });
 }
 
@@ -222,8 +238,9 @@ for (const [label, Cap, capFor, hostFor, uct] of [
     assert.equal(Cap.WORKSPACE_COMMAND, 'workspace_command');
   });
 
-  test(`[${label}] workspace_apply_patch maps to WORKSPACE_WRITE`, () => {
+  test(`[${label}] workspace_apply_patch and workspace_create_file map to WORKSPACE_WRITE`, () => {
     assert.equal(capFor('workspace_apply_patch', {}), Cap.WORKSPACE_WRITE);
+    assert.equal(capFor('workspace_create_file', {}), Cap.WORKSPACE_WRITE);
   });
 
   test(`[${label}] workspace_run_command maps to WORKSPACE_COMMAND`, () => {
@@ -236,7 +253,7 @@ for (const [label, Cap, capFor, hostFor, uct] of [
     }
   });
 
-  test(`[${label}] all 7 workspace tools are in UNTRUSTED_CONTENT_TOOLS`, () => {
+  test(`[${label}] all 8 workspace tools are in UNTRUSTED_CONTENT_TOOLS`, () => {
     for (const tool of WORKSPACE_ALL_TOOLS) {
       assert.equal(uct.has(tool.function.name), true, `${label}: ${tool.function.name} must be in UNTRUSTED_CONTENT_TOOLS`);
     }
@@ -348,6 +365,10 @@ asyncTest('executeWorkspaceTool enforces write and command capabilities', async 
   assert.equal(patchRes.success, false);
   assert.match(patchRes.error, /write capability is not authorized/i);
 
+  const createRes = await mgr.executeWorkspaceTool('workspace_create_file', { path: 'new.md', content: 'hello' });
+  assert.equal(createRes.success, false);
+  assert.match(createRes.error, /write capability is not authorized/i);
+
   // Command should be rejected
   const cmdRes = await mgr.executeWorkspaceTool('workspace_run_command', { command: 'cargo test' });
   assert.equal(cmdRes.success, false);
@@ -379,6 +400,9 @@ asyncTest('file revision cache updates on read, patch, and file.changed events',
           if (msg.method === 'workspace.apply_patch') {
             return { ok: true, result: { path: 'src/main.rs', oldRevision: 5, newRevision: 6, newHash: 'h6' } };
           }
+          if (msg.method === 'workspace.create_file') {
+            return { ok: true, result: { path: 'src/new.rs', revision: 1, hash: 'h1' } };
+          }
         }
         return { ok: true };
       },
@@ -399,8 +423,10 @@ asyncTest('file revision cache updates on read, patch, and file.changed events',
   // 3. External file.changed event updates cache
   mgr.handleWorkspaceEvent('file.changed', { path: 'src/main.rs', revision: 7, hash: 'h7' });
   assert.deepEqual(mgr.fileRevisionCache.get('src/main.rs')?.revision, 7);
+  // 4. Create file updates cache
+  await mgr.executeWorkspaceTool('workspace_create_file', { path: 'src/new.rs', content: 'fn main() {}' });
+  assert.deepEqual(mgr.fileRevisionCache.get('src/new.rs')?.revision, 1);
 });
-
 console.log('\n--- Prompt Guidance Tests ---');
 
 test('SYSTEM_PROMPT_WORKSPACE covers all required coding loop steps', () => {
